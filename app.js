@@ -144,7 +144,13 @@ const SismocanApp = (() => {
       maxZoom: CONFIG.tile.maxZoom,
     }).addTo(map);
 
-    markerLayer = L.layerGroup().addTo(map);
+    markerLayer = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      disableClusteringAtZoom: 13,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      chunkedLoading: true,
+    }).addTo(map);
 
     // Force Leaflet to recalculate container dimensions once the DOM has fully
     // painted. Without this, percentage-based flex heights can yield a 0-px
@@ -218,21 +224,26 @@ const SismocanApp = (() => {
    * @returns {string} HTML string
    */
   function buildPopupHTML(props, coords) {
-    const mag   = props.mag   != null ? props.mag.toFixed(1) : '—';
-    const depth = coords[2]   != null ? `${coords[2]} km`    : '—';
-    const place = props.place || 'Desconocida';
-    const time  = formatDate(props.time);
-    const type  = getMagnitudeLabel(props.mag ?? 0);
+    const mag    = props.mag   != null ? props.mag.toFixed(1) : '—';
+    const depth  = coords[2]   != null ? `${coords[2]} km`   : '—';
+    const place  = props.place || 'Desconocida';
+    const time   = formatDate(props.time);
+    const type   = getMagnitudeLabel(props.mag ?? 0);
+    const isIgn  = props.source === 'ign';
+    const srcLabel = isIgn ? 'IGN' : 'USGS';
 
     const detailLink = props.url
       ? `<a href="${props.url}" class="popup-link" target="_blank" rel="noopener noreferrer">
-           Ver detalle en USGS ↗
+           Ver detalle en ${srcLabel} ↗
          </a>`
       : '';
 
     return `
       <div class="quake-popup">
-        <h3 class="popup-title">Seísmo M${mag}</h3>
+        <div class="popup-header">
+          <h3 class="popup-title">Seísmo M${mag}</h3>
+          <span class="popup-source popup-source--${isIgn ? 'ign' : 'usgs'}">${srcLabel}</span>
+        </div>
         <dl class="popup-data">
           <div class="popup-row">
             <dt>Magnitud</dt>
@@ -379,35 +390,54 @@ const SismocanApp = (() => {
    * without re-fetching data from the network.
    */
   function bindFilterControls() {
-    const daysSelect  = document.getElementById('filter-days');
-    const magRange    = document.getElementById('filter-mag');
-    const magValueEl  = document.getElementById('filter-mag-value');
-    const resetBtn    = document.getElementById('btn-reset');
+    const daysSelect = document.getElementById('filter-days');
+    const magRange   = document.getElementById('filter-mag');
+    const magNumber  = document.getElementById('filter-mag-number');
+    const resetBtn   = document.getElementById('btn-reset');
 
-    /** Repaints with current filter values (no network request). */
+    function syncAriaRange(val) {
+      if (!magRange) return;
+      magRange.setAttribute('aria-valuenow',  val);
+      magRange.setAttribute('aria-valuetext', `Magnitud mínima ${parseFloat(val).toFixed(1)}`);
+    }
+
+    /** Repaints con los filtros actuales (sin petición de red). */
     function onFilterChange() {
       const filters = getFilters();
-
-      // Update accessible range label
-      const magLabel = filters.minMag.toFixed(1);
-      if (magValueEl) magValueEl.textContent = magLabel;
-      if (magRange) {
-        magRange.setAttribute('aria-valuenow',  filters.minMag);
-        magRange.setAttribute('aria-valuetext', `Magnitud mínima ${magLabel}`);
-      }
-
+      syncAriaRange(filters.minMag);
       const filtered = applyFilters(allFeatures, filters);
       renderMarkers(filtered);
       updateStats(filtered);
     }
 
+    // Slider → sincroniza número
+    function onRangeInput() {
+      if (magNumber) magNumber.value = parseFloat(magRange.value).toFixed(1);
+      onFilterChange();
+    }
+
+    // Número → sincroniza slider (y clampea al rango)
+    function onNumberInput() {
+      let val = parseFloat(magNumber.value);
+      if (isNaN(val)) val = 0;
+      val = Math.min(6, Math.max(0, val));
+      magNumber.value = val.toFixed(1);
+      if (magRange) magRange.value = val;
+      onFilterChange();
+    }
+
     if (daysSelect) daysSelect.addEventListener('change', onFilterChange);
-    if (magRange)   magRange.addEventListener('input',   onFilterChange);
+    if (magRange)   magRange.addEventListener('input',   onRangeInput);
+    if (magNumber) {
+      magNumber.addEventListener('input',  onNumberInput);
+      magNumber.addEventListener('change', onNumberInput);
+    }
 
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
-        if (daysSelect) daysSelect.value = CONFIG.defaults.days;
-        if (magRange)   magRange.value   = CONFIG.defaults.minMag;
+        if (daysSelect) daysSelect.value  = CONFIG.defaults.days;
+        if (magRange)   magRange.value    = CONFIG.defaults.minMag;
+        if (magNumber)  magNumber.value   = parseFloat(CONFIG.defaults.minMag).toFixed(1);
         onFilterChange();
       });
     }
