@@ -70,8 +70,11 @@ const SismocanApp = (() => {
   /** @type {boolean} Si el modo heatmap está activo. */
   let isHeatmapMode = false;
 
-  /** @type {Object|null} Instancia del gráfico mensual de Chart.js. */
-  let monthlyChart = null;
+  /** @type {Object|null} Instancia del gráfico de profundidad (sección cruzada). */
+  let depthChart = null;
+
+  /** @type {boolean} Si el panel de profundidad está abierto. */
+  let isDepthViewOpen = false;
 
   /** @type {Object|null} Feature más reciente del filtro activo. */
   let latestFeature = null;
@@ -337,8 +340,13 @@ const SismocanApp = (() => {
       const fid = feature.id || feature.properties?.id;
       marker.bindPopup(buildPopupHTML(props, coords, fid), { maxWidth: 300 });
       marker.bindTooltip(
-        `M${mag != null ? mag.toFixed(1) : '—'} · ${props.place ?? ''}`,
-        { direction: 'top', opacity: 0.95 }
+        [
+          `<strong>M${mag != null ? mag.toFixed(1) : '—'}</strong>`,
+          props.place ?? '',
+          depth != null ? `${depth} km prof.` : '',
+          props.time ? formatDate(props.time) : '',
+        ].filter(Boolean).join('<br>'),
+        { direction: 'top', opacity: 0.97, className: 'leaflet-tooltip-rich' }
       );
 
       if (fid) markerMap.set(String(fid), marker);
@@ -377,7 +385,7 @@ const SismocanApp = (() => {
       setEl('stat-latest-place', '—');
       setEl('stat-latest-depth', '—');
       updateLatestEventCard(null);
-      updateChart(filtered);
+      updateComparativa(null);
       return;
     }
 
@@ -394,7 +402,8 @@ const SismocanApp = (() => {
     setEl('stat-latest-depth', latestDepth != null ? `${latestDepth} km` : '—');
 
     updateLatestEventCard(latestFeature);
-    updateChart(filtered);
+    updateComparativa(filtered);
+    if (isDepthViewOpen) updateDepthChart(filtered);
   }
 
   // -------------------------------------------------------------------------
@@ -504,58 +513,113 @@ const SismocanApp = (() => {
   }
 
   // -------------------------------------------------------------------------
-  // Monthly chart (Chart.js)
+  // Comparativa de períodos
   // -------------------------------------------------------------------------
 
   /**
-   * Calcula eventos por mes de los últimos 24 meses.
-   * @param {Array<Object>} features
-   * @returns {{ labels: string[], data: number[] }}
+   * Compara el número de eventos del período actual vs el período anterior del mismo tamaño.
+   * @param {Array<Object>|null} filtered  Features del período activo
    */
-  function getMonthlyData(features) {
-    const counts = {};
-    features.forEach((f) => {
-      const t = f.properties?.time;
-      if (!t) return;
-      const d = new Date(t);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    const keys = Object.keys(counts).sort().slice(-24);
-    return {
-      labels: keys,
-      data:   keys.map((k) => counts[k]),
-    };
-  }
+  function updateComparativa(filtered) {
+    const el = document.getElementById('stat-comparativa');
+    if (!el) return;
 
-  /**
-   * Crea o actualiza el gráfico mensual de Chart.js.
-   * @param {Array<Object>} features  Features filtradas actualmente visibles
-   */
-  function updateChart(features) {
-    const ctx = document.getElementById('chart-monthly');
-    if (!ctx || typeof Chart === 'undefined') return;
-
-    const { labels, data } = getMonthlyData(features);
-
-    if (monthlyChart) {
-      monthlyChart.data.labels = labels;
-      monthlyChart.data.datasets[0].data = data;
-      monthlyChart.update('none');
+    const filters  = getFilters();
+    const days     = filters.days;
+    if (days === 'all' || !filtered) {
+      el.textContent = '—';
+      el.className = '';
       return;
     }
 
-    monthlyChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          data,
-          backgroundColor: '#38bdf8',
-          borderRadius: 2,
-          borderSkipped: false,
-        }],
-      },
+    const daysNum  = Number(days);
+    const now      = Date.now();
+    const cutoff1  = now - daysNum * 86_400_000;
+    const cutoff2  = cutoff1 - daysNum * 86_400_000;
+    const minMag   = filters.minMag;
+
+    const prevCount = allFeatures.filter((f) => {
+      const t   = f.properties?.time ?? 0;
+      const mag = f.properties?.mag  ?? -Infinity;
+      return t >= cutoff2 && t < cutoff1 && mag >= minMag;
+    }).length;
+
+    const currCount = filtered.length;
+    const diff      = currCount - prevCount;
+    const pct       = prevCount > 0
+      ? Math.abs(Math.round((diff / prevCount) * 100))
+      : null;
+
+    if (diff === 0 || prevCount === 0) {
+      el.textContent = '= sin cambios';
+      el.className = 'comparativa-neutral';
+    } else {
+      const arrow = diff > 0 ? '▲' : '▼';
+      const pctStr = pct != null ? ` (${pct}%)` : '';
+      el.textContent = `${arrow} ${Math.abs(diff)} eventos${pctStr}`;
+      el.className = diff > 0 ? 'comparativa-up' : 'comparativa-down';
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Depth cross-section
+  // -------------------------------------------------------------------------
+
+  function toggleDepthView(features) {
+    const panel  = document.getElementById('depth-panel');
+    const btn    = document.getElementById('btn-depth-view');
+    isDepthViewOpen = !isDepthViewOpen;
+
+    if (isDepthViewOpen) {
+      panel?.classList.add('is-visible');
+      btn?.setAttribute('aria-pressed', 'true');
+      updateDepthChart(features);
+    } else {
+      panel?.classList.remove('is-visible');
+      btn?.setAttribute('aria-pressed', 'false');
+    }
+  }
+
+  /**
+   * Diagrama de dispersión: tiempo en X, profundidad (invertida) en Y.
+   * El color representa la magnitud.
+   * @param {Array<Object>} features
+   */
+  function updateDepthChart(features) {
+    const ctx = document.getElementById('chart-depth');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    // Ordenar por tiempo, tomar los últimos 500 eventos para no saturar
+    const sorted = [...features]
+      .filter((f) => f.geometry?.coordinates?.[2] != null && f.properties?.time)
+      .sort((a, b) => (a.properties.time ?? 0) - (b.properties.time ?? 0))
+      .slice(-500);
+
+    const points = sorted.map((f) => ({
+      x: f.properties.time,
+      y: f.geometry.coordinates[2],
+      mag: f.properties.mag ?? 0,
+    }));
+
+    const data = {
+      datasets: [{
+        data:            points,
+        parsing:         { xAxisKey: 'x', yAxisKey: 'y' },
+        pointBackgroundColor: points.map((p) => getMagnitudeColor(p.mag)),
+        pointRadius:     points.map((p) => getMagnitudeRadius(p.mag) * 0.7),
+        pointBorderWidth: 0,
+      }],
+    };
+
+    if (depthChart) {
+      depthChart.data = data;
+      depthChart.update('none');
+      return;
+    }
+
+    depthChart = new Chart(ctx, {
+      type: 'scatter',
+      data,
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -564,29 +628,73 @@ const SismocanApp = (() => {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              title: (items) => items[0].label,
-              label:  (item) => `${item.raw} se\xedsmos`,
+              label: (item) => {
+                const p = points[item.dataIndex];
+                return `M${p.mag.toFixed(1)} · ${p.y} km · ${formatDate(p.x)}`;
+              },
             },
             backgroundColor: '#1e293b',
             titleColor: '#f1f5f9',
-            bodyColor: '#94a3b8',
+            bodyColor:  '#94a3b8',
             borderColor: '#334155',
             borderWidth: 1,
           },
         },
         scales: {
           x: {
+            type: 'linear',
             display: false,
-            grid: { display: false },
           },
           y: {
-            display: false,
-            grid: { display: false },
-            beginAtZero: true,
+            display: true,
+            reverse: true,   // profundidad crece hacia abajo
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            ticks: {
+              color: '#94a3b8',
+              font: { size: 10 },
+              callback: (v) => `${v} km`,
+              maxTicksLimit: 5,
+            },
+            title: {
+              display: true,
+              text: 'Profundidad (km)',
+              color: '#94a3b8',
+              font: { size: 10 },
+            },
           },
         },
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Theme toggle
+  // -------------------------------------------------------------------------
+
+  function initTheme() {
+    const saved = localStorage.getItem('sismocan-theme');
+    if (saved === 'light') applyTheme('light');
+    const btn = document.getElementById('btn-theme');
+    if (btn) btn.addEventListener('click', toggleTheme);
+  }
+
+  function toggleTheme() {
+    const isLight = document.documentElement.classList.contains('theme-light');
+    applyTheme(isLight ? 'dark' : 'light');
+  }
+
+  function applyTheme(theme) {
+    const html = document.documentElement;
+    const btn  = document.getElementById('btn-theme');
+    if (theme === 'light') {
+      html.classList.add('theme-light');
+      if (btn) btn.textContent = '🌙';
+      localStorage.setItem('sismocan-theme', 'light');
+    } else {
+      html.classList.remove('theme-light');
+      if (btn) btn.textContent = '☀️';
+      localStorage.setItem('sismocan-theme', 'dark');
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -754,6 +862,14 @@ const SismocanApp = (() => {
 
       const fid = feature.id || props.id;
       marker.bindPopup(buildPopupHTML(props, coords, fid), { maxWidth: 300 });
+      marker.bindTooltip(
+        [
+          `<strong>M${mag != null ? mag.toFixed(1) : '—'}</strong>`,
+          props.place ?? '',
+          depth != null ? `${depth} km prof.` : '',
+        ].filter(Boolean).join('<br>'),
+        { direction: 'top', opacity: 0.97, className: 'leaflet-tooltip-rich' }
+      );
       if (fid) markerMap.set(String(fid), marker);
       markerLayer.addLayer(marker);
     }
@@ -858,6 +974,26 @@ const SismocanApp = (() => {
       });
     }
 
+    // Depth cross-section toggle
+    const depthViewBtn = document.getElementById('btn-depth-view');
+    if (depthViewBtn) {
+      depthViewBtn.addEventListener('click', () => {
+        const filters  = getFilters();
+        const filtered = applyFilters(allFeatures, filters);
+        toggleDepthView(filtered);
+      });
+    }
+
+    // Depth panel close button
+    const depthCloseBtn = document.getElementById('btn-depth-close');
+    if (depthCloseBtn) {
+      depthCloseBtn.addEventListener('click', () => {
+        const filters  = getFilters();
+        const filtered = applyFilters(allFeatures, filters);
+        if (isDepthViewOpen) toggleDepthView(filtered);
+      });
+    }
+
     // Timeline open
     const timelineOpenBtn = document.getElementById('btn-timeline-open');
     if (timelineOpenBtn) {
@@ -885,6 +1021,7 @@ const SismocanApp = (() => {
    * Bootstraps the application. Called once on DOMContentLoaded.
    */
   function init() {
+    initTheme();
     initMap();
     bindFilterControls();
     initShareButtons();
