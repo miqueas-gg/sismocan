@@ -61,6 +61,29 @@ const SismocanApp = (() => {
   /** @type {number|null} setInterval handle for auto-refresh. */
   let refreshTimer = null;
 
+  /** @type {Map<string, L.CircleMarker>} Feature ID -> marker, para flyTo. */
+  let markerMap = new Map();
+
+  /** @type {L.HeatLayer|null} Capa de calor de Leaflet.heat. */
+  let heatLayer = null;
+
+  /** @type {boolean} Si el modo heatmap está activo. */
+  let isHeatmapMode = false;
+
+  /** @type {Object|null} Instancia del gráfico mensual de Chart.js. */
+  let monthlyChart = null;
+
+  /** @type {Object|null} Feature más reciente del filtro activo. */
+  let latestFeature = null;
+
+  /** Estado del timeline animado. */
+  const timeline = {
+    running: false,
+    index: 0,
+    features: [],
+    timer: null,
+  };
+
   // -------------------------------------------------------------------------
   // Magnitude helpers
   // -------------------------------------------------------------------------
@@ -80,10 +103,17 @@ const SismocanApp = (() => {
   }
 
   /**
-   * Returns the circle radius (px) scaled to magnitude.
-   * @param {number} mag
-   * @returns {number}
+   * Devuelve el grosor del borde del marcador segun la profundidad.
+   * Superficial: borde grueso/brillante. Profundo: borde fino/tenue.
+   * @param {number|null} depth  km
+   * @returns {{ weight: number, opacity: number }}
    */
+  function getDepthBorderStyle(depth) {
+    if (depth == null)       return { weight: 1,   opacity: 0.6 };
+    if (depth < 30)          return { weight: 3,   opacity: 1.0 };  // superficial
+    if (depth < 100)         return { weight: 1.5, opacity: 0.7 };  // intermedio
+    return                          { weight: 0.5, opacity: 0.3 };  // profundo
+  }
   function getMagnitudeRadius(mag) {
     if (mag >= 6.0) return 20;
     if (mag >= 5.0) return 15;
@@ -145,8 +175,8 @@ const SismocanApp = (() => {
     }).addTo(map);
 
     markerLayer = L.markerClusterGroup({
-      maxClusterRadius: 50,
-      disableClusteringAtZoom: 13,
+      maxClusterRadius: 25,
+      disableClusteringAtZoom: 10,
       spiderfyOnMaxZoom: true,
       showCoverageOnHover: false,
       chunkedLoading: true,
@@ -223,7 +253,7 @@ const SismocanApp = (() => {
    * @param {Array}  coords [lon, lat, depth]
    * @returns {string} HTML string
    */
-  function buildPopupHTML(props, coords) {
+  function buildPopupHTML(props, coords, featureId) {
     const mag    = props.mag   != null ? props.mag.toFixed(1) : '—';
     const depth  = coords[2]   != null ? `${coords[2]} km`   : '—';
     const place  = props.place || 'Desconocida';
@@ -236,6 +266,12 @@ const SismocanApp = (() => {
       ? `<a href="${props.url}" class="popup-link" target="_blank" rel="noopener noreferrer">
            Ver detalle en ${srcLabel} ↗
          </a>`
+      : '';
+
+    const shareBtn = featureId
+      ? `<button class="popup-link btn-share" data-feature-id="${featureId}" type="button" style="background:none;border:none;cursor:pointer;padding:0;margin-top:4px;display:block;">
+           📎 Copiar enlace
+         </button>`
       : '';
 
     return `
@@ -263,6 +299,7 @@ const SismocanApp = (() => {
           </div>
         </dl>
         ${detailLink}
+        ${shareBtn}
       </div>`;
   }
 
@@ -276,6 +313,7 @@ const SismocanApp = (() => {
    */
   function renderMarkers(features) {
     markerLayer.clearLayers();
+    markerMap.clear();
 
     features.forEach((feature) => {
       const coords = feature.geometry?.coordinates;
@@ -284,27 +322,36 @@ const SismocanApp = (() => {
       const [lon, lat] = coords;
       const props = feature.properties ?? {};
       const mag   = props.mag ?? 0;
+      const depth = coords[2] ?? props.depth ?? null;
+      const borderStyle = getDepthBorderStyle(depth);
 
       const marker = L.circleMarker([lat, lon], {
         radius:      getMagnitudeRadius(mag),
         fillColor:   getMagnitudeColor(mag),
         color:       'rgba(255,255,255,0.6)',
-        weight:      1,
-        opacity:     1,
+        weight:      borderStyle.weight,
+        opacity:     borderStyle.opacity,
         fillOpacity: 0.8,
       });
 
-      // Popup (click)
-      marker.bindPopup(buildPopupHTML(props, coords), { maxWidth: 300 });
-
-      // Tooltip (hover / keyboard focus) — accessible text alternative
+      const fid = feature.id || feature.properties?.id;
+      marker.bindPopup(buildPopupHTML(props, coords, fid), { maxWidth: 300 });
       marker.bindTooltip(
         `M${mag != null ? mag.toFixed(1) : '—'} · ${props.place ?? ''}`,
         { direction: 'top', opacity: 0.95 }
       );
 
+      if (fid) markerMap.set(String(fid), marker);
       markerLayer.addLayer(marker);
     });
+
+    // Actualizar el contador overlay del mapa
+    const counter = document.getElementById('map-counter');
+    if (counter) {
+      counter.textContent = features.length > 0
+        ? `${features.length.toLocaleString('es-ES')} seísmos`
+        : 'Ningún seísmo con estos filtros';
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -327,13 +374,17 @@ const SismocanApp = (() => {
     if (filtered.length === 0) {
       setEl('stat-max-mag', '—');
       setEl('stat-latest',  '—');
+      setEl('stat-latest-place', '—');
+      setEl('stat-latest-depth', '—');
+      updateLatestEventCard(null);
+      updateChart(filtered);
       return;
     }
 
     const maxMag = Math.max(...filtered.map((f) => f.properties?.mag ?? -Infinity));
     setEl('stat-max-mag', isFinite(maxMag) ? maxMag.toFixed(1) : '—');
 
-    const latestFeature = filtered.reduce((best, f) =>
+    latestFeature = filtered.reduce((best, f) =>
       (f.properties?.time ?? 0) > (best.properties?.time ?? 0) ? f : best
     , filtered[0]);
     const latestMs = latestFeature.properties?.time ?? 0;
@@ -341,6 +392,9 @@ const SismocanApp = (() => {
     setEl('stat-latest-place', latestFeature.properties?.place || '—');
     const latestDepth = latestFeature.geometry?.coordinates?.[2];
     setEl('stat-latest-depth', latestDepth != null ? `${latestDepth} km` : '—');
+
+    updateLatestEventCard(latestFeature);
+    updateChart(filtered);
   }
 
   // -------------------------------------------------------------------------
@@ -388,6 +442,344 @@ const SismocanApp = (() => {
   }
 
   // -------------------------------------------------------------------------
+  // Latest event card
+  // -------------------------------------------------------------------------
+
+  /**
+   * Actualiza la tarjeta del último seísmo en el sidebar.
+   * @param {Object|null} feature  GeoJSON feature más reciente, o null si no hay datos.
+   */
+  function updateLatestEventCard(feature) {
+    const setEl = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val;
+    };
+
+    if (!feature) {
+      setEl('latest-card-mag',   '—');
+      setEl('latest-card-time',  'Sin datos');
+      setEl('latest-card-place', '—');
+      setEl('latest-card-depth', '—');
+      return;
+    }
+
+    const props = feature.properties ?? {};
+    const coords = feature.geometry?.coordinates ?? [];
+    const mag   = props.mag   != null ? `M${props.mag.toFixed(1)}` : '—';
+    const depth = coords[2]   != null ? `${coords[2]} km prof.`    : '—';
+    const place = props.place || 'Desconocida';
+    const timeAgo = formatTimeAgo(props.time);
+
+    setEl('latest-card-mag',   mag);
+    setEl('latest-card-time',  timeAgo);
+    setEl('latest-card-place', place);
+    setEl('latest-card-depth', depth);
+  }
+
+  /**
+   * Devuelve una cadena "Hace X min/h/días" a partir de un epoch ms.
+   * @param {number|null} epochMs
+   * @returns {string}
+   */
+  function formatTimeAgo(epochMs) {
+    if (!epochMs) return '—';
+    const diff = Date.now() - epochMs;
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1)   return 'Ahora mismo';
+    if (mins < 60)  return `Hace ${mins} min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Hace ${hours} h`;
+    const days = Math.floor(hours / 24);
+    return `Hace ${days} día${days !== 1 ? 's' : ''}`;
+  }
+
+  /**
+   * Vuela al mapa y abre el popup de la feature con el ID dado.
+   * @param {string} featureId
+   */
+  function flyToFeature(featureId) {
+    const marker = markerMap.get(String(featureId));
+    if (!marker) return;
+    markerLayer.zoomToShowLayer(marker, () => marker.openPopup());
+  }
+
+  // -------------------------------------------------------------------------
+  // Monthly chart (Chart.js)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Calcula eventos por mes de los últimos 24 meses.
+   * @param {Array<Object>} features
+   * @returns {{ labels: string[], data: number[] }}
+   */
+  function getMonthlyData(features) {
+    const counts = {};
+    features.forEach((f) => {
+      const t = f.properties?.time;
+      if (!t) return;
+      const d = new Date(t);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const keys = Object.keys(counts).sort().slice(-24);
+    return {
+      labels: keys,
+      data:   keys.map((k) => counts[k]),
+    };
+  }
+
+  /**
+   * Crea o actualiza el gráfico mensual de Chart.js.
+   * @param {Array<Object>} features  Features filtradas actualmente visibles
+   */
+  function updateChart(features) {
+    const ctx = document.getElementById('chart-monthly');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    const { labels, data } = getMonthlyData(features);
+
+    if (monthlyChart) {
+      monthlyChart.data.labels = labels;
+      monthlyChart.data.datasets[0].data = data;
+      monthlyChart.update('none');
+      return;
+    }
+
+    monthlyChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: '#38bdf8',
+          borderRadius: 2,
+          borderSkipped: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => items[0].label,
+              label:  (item) => `${item.raw} se\xedsmos`,
+            },
+            backgroundColor: '#1e293b',
+            titleColor: '#f1f5f9',
+            bodyColor: '#94a3b8',
+            borderColor: '#334155',
+            borderWidth: 1,
+          },
+        },
+        scales: {
+          x: {
+            display: false,
+            grid: { display: false },
+          },
+          y: {
+            display: false,
+            grid: { display: false },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Heatmap
+  // -------------------------------------------------------------------------
+
+  /**
+   * Alterna entre modo marcador y modo mapa de calor.
+   * @param {Array<Object>} features  Features filtradas actualmente
+   */
+  function toggleHeatmap(features) {
+    const btn = document.getElementById('btn-heatmap');
+    isHeatmapMode = !isHeatmapMode;
+
+    if (isHeatmapMode) {
+      // Ocultar clústeres y mostrar heatmap
+      if (map.hasLayer(markerLayer)) map.removeLayer(markerLayer);
+
+      const points = features
+        .filter((f) => f.geometry?.coordinates?.length >= 2)
+        .map((f) => {
+          const [lon, lat] = f.geometry.coordinates;
+          const intensity = Math.min((f.properties?.mag ?? 1) / 6, 1);
+          return [lat, lon, intensity];
+        });
+
+      heatLayer = L.heatLayer(points, {
+        radius: 20,
+        blur:   18,
+        maxZoom: 12,
+        gradient: { 0.2: '#818cf8', 0.5: '#34d399', 0.7: '#fbbf24', 0.9: '#fb923c', 1.0: '#f87171' },
+      }).addTo(map);
+
+      if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.textContent = '📍 Marcadores'; }
+    } else {
+      // Volver a marcadores
+      if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+      if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
+
+      if (btn) { btn.setAttribute('aria-pressed', 'false'); btn.textContent = '🌡️ Mapa de calor'; }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // URL sharing
+  // -------------------------------------------------------------------------
+
+  /**
+   * Maneja clics en los botones "Copiar enlace" dentro de popups.
+   * Usa delegación de eventos en el documento.
+   */
+  function initShareButtons() {
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-share');
+      if (!btn) return;
+      const fid = btn.dataset.featureId;
+      if (!fid) return;
+      const url = `${location.origin}${location.pathname}?id=${encodeURIComponent(fid)}`;
+      navigator.clipboard.writeText(url).then(() => {
+        const prev = btn.textContent;
+        btn.textContent = '✅ Enlace copiado';
+        setTimeout(() => { btn.textContent = prev; }, 2000);
+      }).catch(() => {
+        prompt('Copia este enlace:', url);
+      });
+    });
+  }
+
+  /**
+   * Si la URL tiene ?id=, vuela a esa feature y abre su popup.
+   */
+  function checkUrlParam() {
+    const params = new URLSearchParams(location.search);
+    const fid = params.get('id');
+    if (!fid) return;
+    // Esperar a que los marcadores estén renderizados
+    setTimeout(() => flyToFeature(fid), 600);
+  }
+
+  // -------------------------------------------------------------------------
+  // Timeline animado
+  // -------------------------------------------------------------------------
+
+  function openTimeline() {
+    const controls = document.getElementById('timeline-controls');
+    if (controls) controls.classList.add('is-visible');
+    const openBtn = document.getElementById('btn-timeline-open');
+    if (openBtn) openBtn.setAttribute('aria-pressed', 'true');
+
+    // Preparar: ordenar todos los features visibles cronológicamente
+    const filters  = getFilters();
+    const filtered = applyFilters(allFeatures, filters);
+    timeline.features = [...filtered].sort((a, b) =>
+      (a.properties?.time ?? 0) - (b.properties?.time ?? 0)
+    );
+    timeline.index   = 0;
+    timeline.running = false;
+
+    markerLayer.clearLayers();
+    markerMap.clear();
+    updateTimelineUI();
+  }
+
+  function closeTimeline() {
+    stopTimeline();
+    const controls = document.getElementById('timeline-controls');
+    if (controls) controls.classList.remove('is-visible');
+    const openBtn = document.getElementById('btn-timeline-open');
+    if (openBtn) openBtn.setAttribute('aria-pressed', 'false');
+
+    // Restaurar vista normal
+    const filters  = getFilters();
+    const filtered = applyFilters(allFeatures, filters);
+    renderMarkers(filtered);
+    updateStats(filtered);
+  }
+
+  function playTimeline() {
+    if (timeline.index >= timeline.features.length) {
+      timeline.index = 0;
+      markerLayer.clearLayers();
+      markerMap.clear();
+    }
+    timeline.running = true;
+    const playBtn = document.getElementById('btn-timeline-play');
+    if (playBtn) playBtn.textContent = '⏸';
+    stepTimeline();
+  }
+
+  function pauseTimeline() {
+    timeline.running = false;
+    if (timeline.timer) { clearTimeout(timeline.timer); timeline.timer = null; }
+    const playBtn = document.getElementById('btn-timeline-play');
+    if (playBtn) playBtn.textContent = '▶';
+  }
+
+  function stopTimeline() {
+    pauseTimeline();
+    timeline.index = 0;
+  }
+
+  function stepTimeline() {
+    if (!timeline.running || timeline.index >= timeline.features.length) {
+      pauseTimeline();
+      return;
+    }
+
+    const feature = timeline.features[timeline.index];
+    const coords  = feature.geometry?.coordinates;
+    if (Array.isArray(coords) && coords.length >= 2) {
+      const [lon, lat] = coords;
+      const props = feature.properties ?? {};
+      const mag   = props.mag ?? 0;
+      const depth = coords[2] ?? props.depth ?? null;
+      const borderStyle = getDepthBorderStyle(depth);
+
+      const marker = L.circleMarker([lat, lon], {
+        radius:      getMagnitudeRadius(mag),
+        fillColor:   getMagnitudeColor(mag),
+        color:       'rgba(255,255,255,0.6)',
+        weight:      borderStyle.weight,
+        opacity:     borderStyle.opacity,
+        fillOpacity: 0.85,
+      });
+
+      const fid = feature.id || props.id;
+      marker.bindPopup(buildPopupHTML(props, coords, fid), { maxWidth: 300 });
+      if (fid) markerMap.set(String(fid), marker);
+      markerLayer.addLayer(marker);
+    }
+
+    timeline.index++;
+    updateTimelineUI();
+
+    const speed = parseInt(
+      document.getElementById('timeline-speed')?.value ?? '200', 10
+    );
+    timeline.timer = setTimeout(stepTimeline, speed);
+  }
+
+  function updateTimelineUI() {
+    const dateEl = document.getElementById('timeline-date');
+    const progEl = document.getElementById('timeline-progress');
+    const f = timeline.features[timeline.index - 1] ?? timeline.features[0];
+    if (dateEl && f) {
+      dateEl.textContent = formatDate(f.properties?.time);
+    }
+    if (progEl) {
+      progEl.textContent = `${timeline.index} / ${timeline.features.length}`;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Filter event listeners
   // -------------------------------------------------------------------------
 
@@ -412,7 +804,15 @@ const SismocanApp = (() => {
       const filters = getFilters();
       syncAriaRange(filters.minMag);
       const filtered = applyFilters(allFeatures, filters);
-      renderMarkers(filtered);
+
+      if (isHeatmapMode) {
+        // Reconstruir el heatmap con los datos filtrados
+        if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+        isHeatmapMode = false;  // resetear para que toggleHeatmap lo active
+        toggleHeatmap(filtered);
+      } else {
+        renderMarkers(filtered);
+      }
       updateStats(filtered);
     }
 
@@ -447,6 +847,34 @@ const SismocanApp = (() => {
         onFilterChange();
       });
     }
+
+    // Heatmap toggle
+    const heatBtn = document.getElementById('btn-heatmap');
+    if (heatBtn) {
+      heatBtn.addEventListener('click', () => {
+        const filters  = getFilters();
+        const filtered = applyFilters(allFeatures, filters);
+        toggleHeatmap(filtered);
+      });
+    }
+
+    // Timeline open
+    const timelineOpenBtn = document.getElementById('btn-timeline-open');
+    if (timelineOpenBtn) {
+      timelineOpenBtn.addEventListener('click', openTimeline);
+    }
+
+    // Timeline play/pause
+    const playBtn = document.getElementById('btn-timeline-play');
+    if (playBtn) {
+      playBtn.addEventListener('click', () => {
+        if (timeline.running) pauseTimeline(); else playTimeline();
+      });
+    }
+
+    // Timeline close
+    const closeBtn = document.getElementById('btn-timeline-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeTimeline);
   }
 
   // -------------------------------------------------------------------------
@@ -459,8 +887,26 @@ const SismocanApp = (() => {
   function init() {
     initMap();
     bindFilterControls();
+    initShareButtons();
     refresh();
     refreshTimer = setInterval(refresh, CONFIG.refreshIntervalMs);
+
+    // Tarjeta del último seísmo → volar al mapa
+    const latestCard = document.getElementById('latest-event-card');
+    if (latestCard) {
+      latestCard.addEventListener('click', () => {
+        if (!latestFeature) return;
+        const coords = latestFeature.geometry?.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        const fid = latestFeature.id || latestFeature.properties?.id;
+        latestCard.classList.add('is-active');
+        setTimeout(() => latestCard.classList.remove('is-active'), 1500);
+        if (fid) flyToFeature(String(fid));
+      });
+    }
+
+    // Comprobar si la URL tiene ?id= para abrir un seísmo directo
+    checkUrlParam();
   }
 
   // Expose only what is needed externally
