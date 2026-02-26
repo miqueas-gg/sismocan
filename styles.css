@@ -1,0 +1,705 @@
+/* ==========================================================================
+   styles.css — sismocan
+   Mobile-first. CSS custom properties. WCAG AA contrast compliant.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Custom properties (design tokens)
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Colours */
+  --color-bg:           #0f172a;
+  --color-surface:      #1e293b;
+  --color-surface-alt:  #273449;
+  --color-border:       #334155;
+  --color-text:         #f1f5f9;
+  --color-text-muted:   #94a3b8;
+  --color-accent:       #38bdf8;
+  --color-accent-hover: #7dd3fc;
+  --color-focus:        #fbbf24;   /* High-visibility focus ring */
+
+  /* Magnitude palette (accessible on dark background) */
+  --mag-micro:    #818cf8;   /* < 2.0  — indigo   */
+  --mag-minor:    #34d399;   /* 2–3.9  — emerald  */
+  --mag-light:    #fbbf24;   /* 4–4.9  — amber    */
+  --mag-moderate: #fb923c;   /* 5–5.9  — orange   */
+  --mag-strong:   #f87171;   /* ≥ 6.0  — red      */
+
+  /* Status */
+  --color-ok:    #4ade80;
+  --color-error: #f87171;
+
+  /* Layout */
+  --sidebar-width:    280px;
+  --header-height:    56px;
+  --footer-height:    52px;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+}
+
+/* --------------------------------------------------------------------------
+   2. Reset / base
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  height: 100%;
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  height: 100vh;        /* fallback */
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Remove default list styles where lists are used for UI */
+ul,
+ol {
+  list-style: none;
+}
+
+/* Accessible focus ring — visible on all interactive elements */
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   3. Skip link (accessibility)
+   -------------------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-focus);
+  color: #000;
+  font-weight: 700;
+  font-size: 0.875rem;
+  border-radius: var(--radius-sm);
+  z-index: 9999;
+  text-decoration: none;
+  transition: top var(--transition-fast);
+}
+
+.skip-link:focus {
+  top: var(--space-4);
+}
+
+/* --------------------------------------------------------------------------
+   4. Header
+   -------------------------------------------------------------------------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--header-height);
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 8px rgb(0 0 0 / 40%);
+}
+
+.header-inner {
+  max-width: 100%;
+  height: 100%;
+  padding: 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.header-branding {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-accent);
+  line-height: 1;
+}
+
+.header-subtitle {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  display: none; /* Hidden on very small screens */
+}
+
+@media (min-width: 480px) {
+  .header-subtitle {
+    display: block;
+  }
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.status-badge.is-ok {
+  color: var(--color-ok);
+  border-color: var(--color-ok);
+}
+
+.status-badge.is-error {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.status-time {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .status-time {
+    display: block;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   5. Layout
+   -------------------------------------------------------------------------- */
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Altura explícita en todos los breakpoints para que los hijos puedan
+     resolver height:100% y flex:1 correctamente */
+  height: calc(100vh - var(--header-height) - var(--footer-height));   /* fallback */
+  height: calc(100dvh - var(--header-height) - var(--footer-height));
+}
+
+/* --------------------------------------------------------------------------
+   6. Sidebar
+   -------------------------------------------------------------------------- */
+
+.sidebar {
+  width: 100%;
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  overflow-y: auto;
+  flex-shrink: 0;      /* Evita que el flex la comprima en mobile */
+  max-height: 38vh;    /* En mobile: limitar para que el mapa tenga espacio */
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .layout {
+    flex-direction: row;
+  }
+  .sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    max-height: none;      /* En desktop sin límite; el overflow-y:auto lo gestiona */
+    border-bottom: none;
+    border-right: 1px solid var(--color-border);
+    height: 100%;
+  }
+}
+
+/* Panel sections inside sidebar */
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.panel-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   7. Filter controls
+   -------------------------------------------------------------------------- */
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filter-label {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  cursor: default;
+}
+
+.filter-label strong {
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  padding-right: 2rem;
+  transition: border-color var(--transition-fast);
+}
+
+.filter-select:hover {
+  border-color: var(--color-accent);
+}
+
+/* Range input */
+.filter-range {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.filter-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+  border: 2px solid var(--color-bg);
+  transition: transform var(--transition-fast);
+}
+
+.filter-range::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+.filter-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+  border: 2px solid var(--color-bg);
+}
+
+.mag-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mag-input-row .filter-range {
+  flex: 1;
+}
+
+.filter-number {
+  width: 4rem;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.filter-number::-webkit-outer-spin-button,
+.filter-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.filter-number:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.range-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.btn-secondary {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+  align-self: flex-start;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* --------------------------------------------------------------------------
+   8. Legend
+   -------------------------------------------------------------------------- */
+
+.legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.825rem;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+}
+
+.legend-dot.mag-micro    { background-color: var(--mag-micro);    }
+.legend-dot.mag-minor    { background-color: var(--mag-minor);    }
+.legend-dot.mag-light    { background-color: var(--mag-light);    }
+.legend-dot.mag-moderate { background-color: var(--mag-moderate); }
+.legend-dot.mag-strong   { background-color: var(--mag-strong);   }
+
+.legend-range {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------------------
+   9. Stats panel
+   -------------------------------------------------------------------------- */
+
+.stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 0.825rem;
+}
+
+.stats-row dt {
+  color: var(--color-text-muted);
+}
+
+.stats-row dd {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  text-align: right;
+}
+
+/* --------------------------------------------------------------------------
+   10. Map
+   -------------------------------------------------------------------------- */
+
+.map-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-height: 320px;
+  min-width: 0;
+}
+
+#map {
+  width: 100%;
+  flex: 1;           /* Ocupa todo el espacio disponible en el flex container */
+  min-height: 320px;
+  background-color: var(--color-bg);
+}
+
+/* Leaflet overrides */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #1a2744;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+  padding: 0;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+}
+
+.leaflet-popup-tip {
+  background: var(--color-surface);
+}
+
+.leaflet-popup-close-button {
+  color: var(--color-text-muted) !important;
+  font-size: 1.25rem !important;
+  padding: var(--space-2) var(--space-3) !important;
+}
+
+.leaflet-popup-close-button:hover {
+  color: var(--color-text) !important;
+}
+
+/* --------------------------------------------------------------------------
+   11. Popup content
+   -------------------------------------------------------------------------- */
+
+.quake-popup {
+  padding: var(--space-4);
+  min-width: 220px;
+}
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.popup-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0;
+  color: var(--color-accent);
+}
+
+.popup-source {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.popup-source--ign {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.popup-source--usgs {
+  background: #15803d;
+  color: #fff;
+}
+
+.popup-data {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: 0.825rem;
+}
+
+.popup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.popup-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.popup-row dt {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.popup-row dd {
+  font-weight: 600;
+  text-align: right;
+}
+
+.popup-type {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.popup-place dd {
+  max-width: 160px;
+  text-align: right;
+  font-weight: 400;
+}
+
+.popup-link {
+  display: inline-block;
+  margin-top: var(--space-3);
+  font-size: 0.8rem;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.popup-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   12. Footer
+   -------------------------------------------------------------------------- */
+
+.site-footer {
+  background-color: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  height: var(--footer-height);
+  display: flex;
+  align-items: center;
+}
+
+.footer-inner {
+  padding: 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.footer-attribution a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.footer-attribution a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.footer-license {
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   13. No-script fallback
+   -------------------------------------------------------------------------- */
+
+.noscript-notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  padding: var(--space-8);
+  text-align: center;
+  font-size: 1rem;
+  color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   14. Reduced motion
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
