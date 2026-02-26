@@ -333,8 +333,14 @@ const SismocanApp = (() => {
     const maxMag = Math.max(...filtered.map((f) => f.properties?.mag ?? -Infinity));
     setEl('stat-max-mag', isFinite(maxMag) ? maxMag.toFixed(1) : '—');
 
-    const latestMs = Math.max(...filtered.map((f) => f.properties?.time ?? 0));
+    const latestFeature = filtered.reduce((best, f) =>
+      (f.properties?.time ?? 0) > (best.properties?.time ?? 0) ? f : best
+    , filtered[0]);
+    const latestMs = latestFeature.properties?.time ?? 0;
     setEl('stat-latest', formatDate(latestMs));
+    setEl('stat-latest-place', latestFeature.properties?.place || '—');
+    const latestDepth = latestFeature.geometry?.coordinates?.[2];
+    setEl('stat-latest-depth', latestDepth != null ? `${latestDepth} km` : '—');
   }
 
   // -------------------------------------------------------------------------
