@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Mapa interactivo de sismicidad en las Islas Canarias. Datos del catálogo USGS actualizados automáticamente cada 5 minutos."
+    />
+    <meta name="theme-color" content="#0f172a" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="sismocan — Sismicidad en Canarias" />
+    <meta
+      property="og:description"
+      content="Mapa interactivo de seísmos en las Islas Canarias, actualizado cada 5 minutos."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>sismocan — Sismicidad en Canarias</title>
+
+    <!-- Leaflet CSS (SRI hash) -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin="anonymous"
+    />
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <!-- ── Skip navigation (accessibility: keyboard / screen reader) ──────── -->
+    <a class="skip-link" href="#map">Saltar al mapa</a>
+
+    <!-- ── Header ──────────────────────────────────────────────────────────── -->
+    <header class="site-header" role="banner">
+      <div class="header-inner">
+        <div class="header-branding">
+          <h1 class="header-title">sismocan</h1>
+          <p class="header-subtitle">Sismicidad en las Islas Canarias</p>
+        </div>
+
+        <!-- Live region: screen readers announce updates automatically -->
+        <div
+          class="header-status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label="Estado de los datos"
+        >
+          <span id="status-badge" class="status-badge" role="status">Cargando…</span>
+          <span id="status-time" class="status-time"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Main layout ─────────────────────────────────────────────────────── -->
+    <div class="layout">
+
+      <!-- Sidebar with filters, legend and stats -->
+      <aside class="sidebar" aria-label="Panel de filtros y estadísticas">
+
+        <!-- Filters -->
+        <section class="panel-section" aria-labelledby="filters-heading">
+          <h2 id="filters-heading" class="panel-heading">Filtros</h2>
+
+          <div class="filter-group">
+            <label for="filter-days" class="filter-label">Período</label>
+            <select id="filter-days" class="filter-select">
+              <option value="1">Últimas 24 horas</option>
+              <option value="7" selected>Últimos 7 días</option>
+              <option value="30">Últimos 30 días</option>
+              <option value="365">Último año</option>
+              <option value="all">Todo el histórico</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-mag" class="filter-label">
+              Magnitud mínima:
+              <strong id="filter-mag-value" aria-live="polite">0.0</strong>
+            </label>
+            <input
+              type="range"
+              id="filter-mag"
+              class="filter-range"
+              min="0"
+              max="7"
+              step="0.5"
+              value="0"
+              aria-valuemin="0"
+              aria-valuemax="7"
+              aria-valuenow="0"
+              aria-valuetext="Magnitud mínima 0.0"
+            />
+            <div class="range-ticks" aria-hidden="true">
+              <span>0</span>
+              <span>3.5</span>
+              <span>7</span>
+            </div>
+          </div>
+
+          <button id="btn-reset" class="btn-secondary" type="button">
+            Restablecer filtros
+          </button>
+        </section>
+
+        <!-- Legend -->
+        <section class="panel-section" aria-labelledby="legend-heading">
+          <h2 id="legend-heading" class="panel-heading">Leyenda</h2>
+          <ul class="legend-list" role="list">
+            <li class="legend-item">
+              <span class="legend-dot mag-micro" aria-hidden="true"></span>
+              <span>Micro <span class="legend-range">(&lt; 2.0)</span></span>
+            </li>
+            <li class="legend-item">
+              <span class="legend-dot mag-minor" aria-hidden="true"></span>
+              <span>Menor <span class="legend-range">(2.0 – 3.9)</span></span>
+            </li>
+            <li class="legend-item">
+              <span class="legend-dot mag-light" aria-hidden="true"></span>
+              <span>Ligero <span class="legend-range">(4.0 – 4.9)</span></span>
+            </li>
+            <li class="legend-item">
+              <span class="legend-dot mag-moderate" aria-hidden="true"></span>
+              <span>Moderado <span class="legend-range">(5.0 – 5.9)</span></span>
+            </li>
+            <li class="legend-item">
+              <span class="legend-dot mag-strong" aria-hidden="true"></span>
+              <span>Fuerte <span class="legend-range">(≥ 6.0)</span></span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Stats -->
+        <section class="panel-section" aria-labelledby="stats-heading">
+          <h2 id="stats-heading" class="panel-heading">Estadísticas</h2>
+          <dl class="stats-list">
+            <div class="stats-row">
+              <dt>Eventos mostrados</dt>
+              <dd id="stat-shown" aria-live="polite">—</dd>
+            </div>
+            <div class="stats-row">
+              <dt>Total en base de datos</dt>
+              <dd id="stat-total" aria-live="polite">—</dd>
+            </div>
+            <div class="stats-row">
+              <dt>Mayor magnitud</dt>
+              <dd id="stat-max-mag" aria-live="polite">—</dd>
+            </div>
+            <div class="stats-row">
+              <dt>Evento más reciente</dt>
+              <dd id="stat-latest" aria-live="polite">—</dd>
+            </div>
+          </dl>
+        </section>
+
+      </aside>
+
+      <!-- Map -->
+      <main id="main-content" class="map-wrapper">
+        <div
+          id="map"
+          role="application"
+          aria-label="Mapa interactivo de seísmos en Canarias. Usa las teclas + y − para cambiar el zoom."
+          tabindex="0"
+        ></div>
+
+        <!-- Fallback for users without JavaScript -->
+        <noscript>
+          <div class="noscript-notice" role="alert">
+            <p>
+              Esta aplicación requiere JavaScript para mostrar el mapa
+              interactivo. Actívalo en tu navegador para continuar.
+            </p>
+          </div>
+        </noscript>
+      </main>
+
+    </div><!-- /.layout -->
+
+    <!-- ── Footer ──────────────────────────────────────────────────────────── -->
+    <footer class="site-footer" role="contentinfo">
+      <div class="footer-inner">
+        <p class="footer-attribution">
+          Datos sísmicos:
+          <a
+            href="https://earthquake.usgs.gov"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="USGS Earthquake Hazards Program (abre en nueva pestaña)"
+          >USGS Earthquake Hazards Program</a>
+          · Código:
+          <a
+            href="https://github.com/miqueas-gg/sismocan"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Repositorio sismocan en GitHub (abre en nueva pestaña)"
+          >GitHub</a>
+        </p>
+        <p class="footer-license">Proyecto libre y gratuito · Licencia MIT</p>
+      </div>
+    </footer>
+
+    <!-- Leaflet JS (SRI hash) -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLcE="
+      crossorigin="anonymous"
+    ></script>
+
+    <script src="app.js"></script>
+  </body>
+</html>
