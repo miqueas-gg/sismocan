@@ -28,7 +28,7 @@ BBOX: dict[str, float] = {
     "maxlongitude": -13.0,
 }
 
-MIN_MAGNITUDE: float = 0.0
+MIN_MAGNITUDE: float = 1.5   # USGS no indexa Canarias fiablemente por debajo de M1.5
 
 REQUEST_TIMEOUT: int = 30
 MAX_RETRIES: int = 3

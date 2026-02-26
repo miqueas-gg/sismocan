@@ -33,3 +33,6 @@ desktop.ini
 
 # Logs
 *.log
+
+# Archivos GeoJSON crudos descargados manualmente (artefactos pesados, no versionar)
+data/*.geojson

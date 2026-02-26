@@ -40,6 +40,9 @@ from sources.usgs import fetch_usgs
 
 HISTORY_START: str = "2015-01-01"
 
+# USGS no indexa Canarias fiablemente por debajo de M1.5
+# Los eventos pequeños vienen de IGN
+
 # Look back slightly further than the last event to catch late-arriving data
 OVERLAP_MINUTES: int = 10
 
