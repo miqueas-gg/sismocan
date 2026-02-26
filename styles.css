@@ -68,6 +68,7 @@
 }
 
 html {
+  height: 100%;
   font-size: 16px;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
@@ -78,10 +79,11 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
-  min-height: 100dvh;
+  height: 100vh;        /* fallback */
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
 }
 
 /* Remove default list styles where lists are used for UI */
@@ -225,6 +227,7 @@ ol {
 @media (min-width: 768px) {
   .layout {
     flex-direction: row;
+    height: calc(100vh - var(--header-height) - var(--footer-height));   /* fallback */
     height: calc(100dvh - var(--header-height) - var(--footer-height));
   }
 }
@@ -238,6 +241,7 @@ ol {
   background-color: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   overflow-y: auto;
+  flex-shrink: 0;      /* Evita que el flex la comprima en mobile */
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
@@ -458,13 +462,16 @@ ol {
 
 #map {
   width: 100%;
-  height: 100%;
+  /* En mobile: altura explícita para que Leaflet pueda renderizar */
+  height: calc(100vh - var(--header-height) - var(--footer-height) - 220px);
+  height: calc(100dvh - var(--header-height) - var(--footer-height) - 220px);
   min-height: 320px;
   background-color: var(--color-bg);
 }
 
 @media (min-width: 768px) {
   #map {
+    /* En desktop la altura la controla el flex container */
     height: 100%;
     min-height: 0;
   }

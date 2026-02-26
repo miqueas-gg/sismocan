@@ -145,6 +145,11 @@ const SismocanApp = (() => {
     }).addTo(map);
 
     markerLayer = L.layerGroup().addTo(map);
+
+    // Force Leaflet to recalculate container dimensions once the DOM has fully
+    // painted. Without this, percentage-based flex heights can yield a 0-px
+    // container at init time and the map renders blank.
+    setTimeout(() => map.invalidateSize(), 100);
   }
 
   // -------------------------------------------------------------------------

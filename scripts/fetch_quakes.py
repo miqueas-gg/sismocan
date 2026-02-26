@@ -1,12 +1,20 @@
 """
-fetch_quakes.py
----------------
-Fetches seismic event data from the USGS FDSN Event Web Service,
-merges new events into the local GeoJSON accumulative file and saves
+fetch_quakes.py — sismocan orchestrator
+----------------------------------------
+Coordinates data ingestion from all configured sources (USGS, IGN),
+merges new events into the local GeoJSON accumulative store and saves
 the result only when new events are detected.
 
-Data source : https://earthquake.usgs.gov/fdsnws/event/1/
-License     : USGS data is in the public domain.
+Sources
+-------
+  - USGS FDSN Event Web Service  (public domain, REST/GeoJSON)
+  - IGN  Catálogo de Terremotos  (Liferay portlet download endpoint)
+
+Usage
+-----
+  python scripts/fetch_quakes.py
+
+  Intended to be run by GitHub Actions on a cron schedule.
 """
 
 from __future__ import annotations
@@ -14,41 +22,37 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import time
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
+# Add the scripts/ directory to the path so relative imports work both when
+# executed directly and when imported from tests.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from sources.ign import fetch_ign
+from sources.usgs import fetch_usgs
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-USGS_ENDPOINT: str = "https://earthquake.usgs.gov/fdsnws/event/1/query"
-
-# Bounding box for the Canary Islands (decimal degrees)
-BBOX: dict[str, float] = {
-    "minlatitude": 27.0,
-    "maxlatitude": 30.0,
-    "minlongitude": -19.0,
-    "maxlongitude": -13.0,
-}
-
-MIN_MAGNITUDE: float = 0.0
 HISTORY_START: str = "2015-01-01"
 
-# Overlap window to avoid missing events near the query boundary
+# Look back slightly further than the last event to catch late-arriving data
 OVERLAP_MINUTES: int = 10
+
+# For IGN historical fetch, split into monthly chunks to respect server limits
+IGN_CHUNK_MONTHS: int = 1
 
 # Where the accumulative GeoJSON is stored (relative to repo root)
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 OUTPUT_FILE: Path = REPO_ROOT / "data" / "sismos.json"
 
-# HTTP settings
-REQUEST_TIMEOUT: int = 30  # seconds
-MAX_RETRIES: int = 3
-RETRY_BACKOFF: int = 5  # seconds between retries
+# Proximity thresholds for cross-source deduplication
+DEDUP_LAT_LON_DELTA: float = 0.15   # degrees  (~15 km)
+DEDUP_TIME_DELTA_MS: int   = 120_000 # 2 minutes in milliseconds
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -82,67 +86,106 @@ def save(path: Path, collection: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         json.dump(collection, fh, ensure_ascii=False, separators=(",", ":"))
-    log.info("Saved %d features → %s", len(collection["features"]), path)
+    log.info("Saved %d features -> %s", len(collection["features"]), path)
 
 
 # ---------------------------------------------------------------------------
-# USGS API
+# Time window helpers
 # ---------------------------------------------------------------------------
 
 
-def fetch_usgs(starttime: str, endtime: str) -> list[dict[str, Any]]:
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _latest_timestamp(features: list[dict[str, Any]]) -> int | None:
+    """Return the maximum time (epoch ms) across all features, or None."""
+    timestamps = [
+        f["properties"]["time"]
+        for f in features
+        if isinstance(f.get("properties", {}).get("time"), (int, float))
+    ]
+    return int(max(timestamps)) if timestamps else None
+
+
+def determine_usgs_window(existing: dict[str, Any]) -> tuple[str, str]:
     """
-    Query the USGS FDSN Event Web Service and return a list of GeoJSON features.
+    Return (starttime, endtime) for the USGS incremental query.
 
-    Retries up to MAX_RETRIES times with exponential-ish back-off on transient
-    errors (network failures, HTTP 5xx, HTTP 429 rate-limit).
+    First run  → full history from HISTORY_START.
+    Subsequent → from (latest event − OVERLAP_MINUTES) to now.
     """
-    params: dict[str, Any] = {
-        "format": "geojson",
-        "starttime": starttime,
-        "endtime": endtime,
-        "minmagnitude": MIN_MAGNITUDE,
-        "orderby": "time-asc",
-        **BBOX,
-    }
+    endtime = _now_iso()
+    features = existing.get("features", [])
+    latest_ms = _latest_timestamp(features)
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            log.info(
-                "Fetching USGS (attempt %d/%d) — window: %s → %s",
-                attempt,
-                MAX_RETRIES,
-                starttime,
-                endtime,
-            )
-            response = requests.get(
-                USGS_ENDPOINT, params=params, timeout=REQUEST_TIMEOUT
-            )
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
-            features: list[dict[str, Any]] = data.get("features", [])
-            log.info("Received %d features from USGS.", len(features))
-            return features
+    if latest_ms is None:
+        log.info("[USGS] No existing data. Full historical fetch from %s.", HISTORY_START)
+        return HISTORY_START, endtime
 
-        except requests.exceptions.HTTPError as exc:
-            status_code = exc.response.status_code if exc.response is not None else 0
-            log.error("HTTP error %d: %s", status_code, exc)
-            if status_code == 429:
-                wait = RETRY_BACKOFF * attempt * 2
-                log.warning("Rate limited. Waiting %ds before retry…", wait)
-                time.sleep(wait)
-                continue
+    latest_dt  = datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc)
+    overlap_dt = latest_dt - timedelta(minutes=OVERLAP_MINUTES)
+    starttime  = overlap_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    log.info(
+        "[USGS] Latest stored: %s. Query from %s (-%d min overlap).",
+        latest_dt.isoformat(), starttime, OVERLAP_MINUTES,
+    )
+    return starttime, endtime
 
-        except requests.exceptions.RequestException as exc:
-            log.error("Request failed: %s", exc)
 
-        if attempt < MAX_RETRIES:
-            wait = RETRY_BACKOFF * attempt
-            log.info("Retrying in %ds…", wait)
-            time.sleep(wait)
+def _monthly_windows(start_iso: str, end_iso: str) -> list[tuple[str, str]]:
+    """
+    Split [start_iso, end_iso] into monthly (DD/MM/YYYY, DD/MM/YYYY) chunks
+    suitable for the IGN form endpoint.
+    """
+    start = datetime.strptime(start_iso[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end   = datetime.strptime(end_iso[:10],   "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
-    log.error("All %d attempts failed. Returning empty list.", MAX_RETRIES)
-    return []
+    windows: list[tuple[str, str]] = []
+    cursor = start
+    while cursor <= end:
+        month_last_day = monthrange(cursor.year, cursor.month)[1]
+        chunk_end = cursor.replace(day=month_last_day)
+        if chunk_end > end:
+            chunk_end = end
+        windows.append(
+            (cursor.strftime("%d/%m/%Y"), chunk_end.strftime("%d/%m/%Y"))
+        )
+        # Advance to the first day of the next month
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1, day=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1, day=1)
+
+    return windows
+
+
+def determine_ign_windows(existing: dict[str, Any]) -> list[tuple[str, str]]:
+    """
+    Return a list of (start_date, end_date) windows (DD/MM/YYYY) for IGN.
+
+    First run  → monthly chunks from HISTORY_START to today.
+    Subsequent → single window covering the last OVERLAP_MINUTES + a few days.
+    """
+    # Filter to IGN-sourced features only
+    ign_features = [
+        f for f in existing.get("features", [])
+        if f.get("properties", {}).get("source") == "ign"
+    ]
+    latest_ms = _latest_timestamp(ign_features)
+    today_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+
+    if latest_ms is None:
+        log.info("[IGN] No existing IGN data. Full historical fetch from %s.", HISTORY_START)
+        return _monthly_windows(HISTORY_START, today_iso)
+
+    latest_dt  = datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc)
+    overlap_dt = latest_dt - timedelta(minutes=OVERLAP_MINUTES)
+    # Use a single window for the incremental case
+    start_ddmmyyyy = overlap_dt.strftime("%d/%m/%Y")
+    end_ddmmyyyy   = datetime.now(tz=timezone.utc).strftime("%d/%m/%Y")
+    log.info("[IGN] Incremental window: %s -> %s", start_ddmmyyyy, end_ddmmyyyy)
+    return [(start_ddmmyyyy, end_ddmmyyyy)]
 
 
 # ---------------------------------------------------------------------------
@@ -150,75 +193,91 @@ def fetch_usgs(starttime: str, endtime: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def merge(
+def merge_by_id(
     existing: dict[str, Any],
     incoming: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], int]:
     """
-    Merge incoming features into the existing FeatureCollection.
+    Merge incoming features using feature 'id' as the deduplication key.
 
-    Deduplicates by the feature 'id' field (USGS event ID, e.g. 'us7000abc1').
-    Returns the merged collection and the count of newly added events.
+    Returns the updated collection and the count of newly added features.
     """
-    seen_ids: set[str] = {f["id"] for f in existing["features"] if "id" in f}
-    new_count: int = 0
+    seen_ids: set[str] = {f["id"] for f in existing["features"] if f.get("id")}
+    new_count = 0
 
     for feature in incoming:
-        event_id: str | None = feature.get("id")
-        if event_id and event_id not in seen_ids:
+        fid = feature.get("id")
+        if fid and fid not in seen_ids:
             existing["features"].append(feature)
-            seen_ids.add(event_id)
+            seen_ids.add(fid)
             new_count += 1
-
-    # Keep features sorted chronologically (oldest first)
-    existing["features"].sort(
-        key=lambda f: f.get("properties", {}).get("time") or 0
-    )
 
     return existing, new_count
 
 
-# ---------------------------------------------------------------------------
-# Time window
-# ---------------------------------------------------------------------------
-
-
-def determine_time_window(existing: dict[str, Any]) -> tuple[str, str]:
+def deduplicate_cross_source(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Determine the query window for USGS.
+    Remove near-duplicate events reported by multiple sources.
 
-    - First run  : fetch the full history from HISTORY_START.
-    - Subsequent : fetch from (latest known event − OVERLAP_MINUTES) to now.
+    Two features are considered duplicates when they are spatially and
+    temporally proximate (within DEDUP_LAT_LON_DELTA degrees and
+    DEDUP_TIME_DELTA_MS milliseconds). When a duplicate pair is found,
+    the IGN record is preferred over USGS as the local network has
+    finer-grained resolution for Canarian events.
+
+    Complexity: O(n²) — acceptable for the expected dataset size (~10k events).
     """
-    now: datetime = datetime.now(tz=timezone.utc)
-    endtime: str = now.strftime("%Y-%m-%dT%H:%M:%S")
+    if len(features) <= 1:
+        return features
 
-    features: list[dict[str, Any]] = existing.get("features", [])
-    if not features:
-        log.info("No existing data. Full historical fetch from %s.", HISTORY_START)
-        return HISTORY_START, endtime
-
-    timestamps: list[int] = [
-        f["properties"]["time"]
-        for f in features
-        if f.get("properties", {}).get("time") is not None
-    ]
-
-    if not timestamps:
-        return HISTORY_START, endtime
-
-    latest_ms: int = max(timestamps)
-    latest_dt: datetime = datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc)
-    overlap_dt: datetime = latest_dt - timedelta(minutes=OVERLAP_MINUTES)
-    starttime: str = overlap_dt.strftime("%Y-%m-%dT%H:%M:%S")
-
-    log.info(
-        "Latest stored event: %s. Query from %s (-%d min overlap).",
-        latest_dt.isoformat(),
-        starttime,
-        OVERLAP_MINUTES,
+    # Sort chronologically for the early-exit optimisation on time delta
+    sorted_f = sorted(
+        features, key=lambda f: f.get("properties", {}).get("time") or 0
     )
-    return starttime, endtime
+    n = len(sorted_f)
+    skip = [False] * n
+
+    for i in range(n):
+        if skip[i]:
+            continue
+        pi     = sorted_f[i].get("properties") or {}
+        ci     = sorted_f[i].get("geometry", {}).get("coordinates") or []
+        ti     = pi.get("time") or 0
+        src_i  = pi.get("source", "")
+        if len(ci) < 2:
+            continue
+
+        for j in range(i + 1, n):
+            if skip[j]:
+                continue
+            pj    = sorted_f[j].get("properties") or {}
+            cj    = sorted_f[j].get("geometry", {}).get("coordinates") or []
+            tj    = pj.get("time") or 0
+            src_j = pj.get("source", "")
+            if len(cj) < 2:
+                continue
+
+            # Early exit: list is time-sorted so no later entry can match
+            if abs(ti - tj) > DEDUP_TIME_DELTA_MS:
+                break
+
+            # Spatial proximity check
+            if (
+                abs(ci[1] - cj[1]) < DEDUP_LAT_LON_DELTA
+                and abs(ci[0] - cj[0]) < DEDUP_LAT_LON_DELTA
+            ):
+                # Prefer IGN; if both same source, keep the first (i)
+                if src_j == "ign" and src_i != "ign":
+                    skip[i] = True
+                    break
+                else:
+                    skip[j] = True
+
+    kept = [f for idx, f in enumerate(sorted_f) if not skip[idx]]
+    removed = n - len(kept)
+    if removed:
+        log.info("Cross-source dedup removed %d duplicate(s).", removed)
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -229,26 +288,59 @@ def determine_time_window(existing: dict[str, Any]) -> tuple[str, str]:
 def main() -> None:
     log.info("=== sismocan / fetch_quakes.py ===")
 
-    existing: dict[str, Any] = load_existing(OUTPUT_FILE)
-    log.info("Existing features in store: %d", len(existing.get("features", [])))
+    existing = load_existing(OUTPUT_FILE)
+    total_before = len(existing.get("features", []))
+    log.info("Features in store before update: %d", total_before)
 
-    starttime, endtime = determine_time_window(existing)
-    incoming: list[dict[str, Any]] = fetch_usgs(starttime, endtime)
+    new_total = 0
 
-    if not incoming:
-        log.info("No data received from USGS. Nothing to update.")
-        return
+    # ------------------------------------------------------------------
+    # Source 1: USGS
+    # ------------------------------------------------------------------
+    usgs_start, usgs_end = determine_usgs_window(existing)
+    usgs_features = fetch_usgs(usgs_start, usgs_end)
+    if usgs_features:
+        existing, added = merge_by_id(existing, usgs_features)
+        log.info("[USGS] New features added: %d", added)
+        new_total += added
 
-    merged, new_count = merge(existing, incoming)
+    # ------------------------------------------------------------------
+    # Source 2: IGN
+    # ------------------------------------------------------------------
+    ign_windows = determine_ign_windows(existing)
+    ign_added_total = 0
+    for start_dmy, end_dmy in ign_windows:
+        ign_features = fetch_ign(start_dmy, end_dmy)
+        if ign_features:
+            existing, added = merge_by_id(existing, ign_features)
+            ign_added_total += added
 
-    if new_count == 0:
-        log.info("No new events detected. Skipping write.")
-        return
+    log.info("[IGN] New features added (all windows): %d", ign_added_total)
+    new_total += ign_added_total
 
-    log.info("New events added: %d. Total in store: %d.", new_count, len(merged["features"]))
-    save(OUTPUT_FILE, merged)
+    # ------------------------------------------------------------------
+    # Cross-source deduplication
+    # ------------------------------------------------------------------
+    if new_total > 0:
+        before_dedup = len(existing["features"])
+        existing["features"] = deduplicate_cross_source(existing["features"])
+        # Sort chronologically (oldest first)
+        existing["features"].sort(
+            key=lambda f: f.get("properties", {}).get("time") or 0
+        )
+        after_dedup = len(existing["features"])
+        net_new = after_dedup - total_before
+        log.info(
+            "Store: %d -> %d (net new: %d, dedup removed: %d).",
+            total_before, after_dedup, net_new, before_dedup - after_dedup,
+        )
+        save(OUTPUT_FILE, existing)
+    else:
+        log.info("No new events from any source. Skipping write.")
+
     log.info("Done.")
 
 
 if __name__ == "__main__":
     main()
+
