@@ -59,6 +59,20 @@
       <!-- Sidebar with filters, legend and stats -->
       <aside class="sidebar" aria-label="Panel de filtros y estadísticas">
 
+        <!-- Latest event card -->
+        <section class="panel-section" aria-labelledby="latest-heading">
+          <h2 id="latest-heading" class="panel-heading">Último registrado</h2>
+          <button id="latest-event-card" class="latest-event-card" type="button" aria-label="Ir al último seísmo en el mapa">
+            <div class="latest-event-mag" id="latest-card-mag">—</div>
+            <div class="latest-event-info">
+              <span id="latest-card-time" class="latest-event-time">—</span>
+              <span id="latest-card-place" class="latest-event-place">—</span>
+              <span id="latest-card-depth" class="latest-event-depth">— km prof.</span>
+            </div>
+            <span class="latest-event-arrow" aria-hidden="true">›</span>
+          </button>
+        </section>
+
         <!-- Filters -->
         <section class="panel-section" aria-labelledby="filters-heading">
           <h2 id="filters-heading" class="panel-heading">Filtros</h2>
@@ -112,6 +126,16 @@
           <button id="btn-reset" class="btn-secondary" type="button">
             Restablecer filtros
           </button>
+
+          <!-- Map mode toggle -->
+          <div class="map-mode-row">
+            <button id="btn-heatmap" class="btn-toggle" type="button" aria-pressed="false">
+              🌡️ Mapa de calor
+            </button>
+            <button id="btn-timeline-open" class="btn-toggle" type="button" aria-pressed="false">
+              ▶ Timeline
+            </button>
+          </div>
         </section>
 
         <!-- Legend -->
@@ -139,6 +163,14 @@
               <span>Fuerte <span class="legend-range">(≥ 6.0)</span></span>
             </li>
           </ul>
+        </section>
+
+        <!-- Monthly chart -->
+        <section class="panel-section" aria-labelledby="chart-heading">
+          <h2 id="chart-heading" class="panel-heading">Actividad mensual</h2>
+          <div class="chart-wrapper">
+            <canvas id="chart-monthly" aria-label="Gráfica de actividad sísmica mensual"></canvas>
+          </div>
         </section>
 
         <!-- Stats -->
@@ -183,6 +215,26 @@
           tabindex="0"
         ></div>
 
+        <!-- Live counter overlay -->
+        <div id="map-counter" class="map-counter" aria-live="polite"></div>
+
+        <!-- Timeline controls -->
+        <div id="timeline-controls" class="timeline-controls" role="region" aria-label="Reproducción cronológica">
+          <button id="btn-timeline-play" class="btn-timeline" type="button" aria-label="Reproducir">
+            ▶
+          </button>
+          <div class="timeline-info">
+            <span id="timeline-date" class="timeline-date">—</span>
+            <span id="timeline-progress" class="timeline-progress">0 / 0</span>
+          </div>
+          <select id="timeline-speed" class="timeline-speed" aria-label="Velocidad">
+            <option value="500">Lento</option>
+            <option value="200" selected>Normal</option>
+            <option value="50">Rápido</option>
+          </select>
+          <button id="btn-timeline-close" class="btn-timeline btn-timeline-close" type="button" aria-label="Cerrar timeline">✕</button>
+        </div>
+
         <!-- Fallback for users without JavaScript -->
         <noscript>
           <div class="noscript-notice" role="alert">
@@ -223,6 +275,10 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Leaflet.markercluster JS -->
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- Leaflet.heat (debe ir después de Leaflet) -->
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <!-- Chart.js -->
+    <script src="https://unpkg.com/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
     <script src="app.js"></script>
 
