@@ -49,6 +49,7 @@
         >
           <span id="status-badge" class="status-badge" role="status">Cargando…</span>
           <span id="status-time" class="status-time"></span>
+          <button id="btn-theme" class="btn-theme" type="button" aria-label="Cambiar tema">☀️</button>
         </div>
       </div>
     </header>
@@ -135,6 +136,9 @@
             <button id="btn-timeline-open" class="btn-toggle" type="button" aria-pressed="false">
               ▶ Timeline
             </button>
+            <button id="btn-depth-view" class="btn-toggle" type="button" aria-pressed="false">
+              📐 Profundidad
+            </button>
           </div>
         </section>
 
@@ -165,14 +169,6 @@
           </ul>
         </section>
 
-        <!-- Monthly chart -->
-        <section class="panel-section" aria-labelledby="chart-heading">
-          <h2 id="chart-heading" class="panel-heading">Actividad mensual</h2>
-          <div class="chart-wrapper">
-            <canvas id="chart-monthly" aria-label="Gráfica de actividad sísmica mensual"></canvas>
-          </div>
-        </section>
-
         <!-- Stats -->
         <section class="panel-section" aria-labelledby="stats-heading">
           <h2 id="stats-heading" class="panel-heading">Estadísticas</h2>
@@ -188,6 +184,10 @@
             <div class="stats-row">
               <dt>Mayor magnitud</dt>
               <dd id="stat-max-mag" aria-live="polite">—</dd>
+            </div>
+            <div class="stats-row comparativa-row">
+              <dt>vs período anterior</dt>
+              <dd id="stat-comparativa" aria-live="polite">—</dd>
             </div>
             <div class="stats-row">
               <dt>Evento más reciente</dt>
@@ -235,6 +235,15 @@
           <button id="btn-timeline-close" class="btn-timeline btn-timeline-close" type="button" aria-label="Cerrar timeline">✕</button>
         </div>
 
+        <!-- Depth cross-section panel -->
+        <div id="depth-panel" class="depth-panel" role="region" aria-label="Sección de profundidad">
+          <div class="depth-panel-header">
+            <span class="depth-panel-title">Sección de profundidad</span>
+            <button id="btn-depth-close" class="btn-timeline btn-timeline-close" type="button" aria-label="Cerrar">✕</button>
+          </div>
+          <canvas id="chart-depth" aria-label="Diagrama profundidad vs tiempo"></canvas>
+        </div>
+
         <!-- Fallback for users without JavaScript -->
         <noscript>
           <div class="noscript-notice" role="alert">
@@ -277,9 +286,6 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <!-- Leaflet.heat (debe ir después de Leaflet) -->
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-    <!-- Chart.js -->
-    <script src="https://unpkg.com/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-
     <script src="app.js"></script>
 
     <!-- GoatCounter analytics -->
