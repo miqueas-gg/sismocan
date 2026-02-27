@@ -1182,10 +1182,131 @@ html.theme-light .event-toast {
 }
 
 /* --------------------------------------------------------------------------
-   27. Reduced motion
+   28. Volcanic activity index panel
    -------------------------------------------------------------------------- */
 
-@media (prefers-reduced-motion: reduce) {
+.vi-section {
+  border-top: 1px solid var(--color-border);
+}
+
+.vi-experimental-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  vertical-align: middle;
+  margin-left: var(--space-2);
+}
+
+.vi-disclaimer {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-3);
+  line-height: 1.5;
+}
+
+.vi-disclaimer a {
+  color: var(--color-accent);
+  text-underline-offset: 2px;
+}
+
+/* Zone card */
+.vi-zone-card {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  transition: border-color 0.3s;
+}
+
+.vi-zone-card[data-level="1"] { border-color: #eab308; }
+.vi-zone-card[data-level="2"] { border-color: #f97316; }
+.vi-zone-card[data-level="3"] { border-color: #ef4444; }
+
+.vi-zone-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.vi-zone-name {
+  flex: 1;
+  font-size: 0.82rem;
+  color: var(--color-text);
+}
+
+.vi-level-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+/* Semáforo dot */
+.vi-dot {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.vi-green  { background: #4ade80; box-shadow: 0 0 6px #4ade8088; }
+.vi-yellow { background: #eab308; box-shadow: 0 0 6px #eab30888;
+             animation: vi-pulse 1.8s ease-in-out infinite alternate; }
+.vi-orange { background: #f97316; box-shadow: 0 0 8px #f9731688;
+             animation: vi-pulse 1.2s ease-in-out infinite alternate; }
+.vi-red    { background: #ef4444; box-shadow: 0 0 10px #ef444488;
+             animation: vi-pulse 0.8s ease-in-out infinite alternate; }
+
+@keyframes vi-pulse {
+  from { opacity: 0.5; transform: scale(0.85); }
+  to   { opacity: 1;   transform: scale(1.15); }
+}
+
+/* Detail rows */
+.vi-details {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--space-2);
+  margin: 0;
+}
+
+.vi-detail-row {
+  display: contents;
+}
+
+.vi-detail-row dt {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  cursor: help;
+  align-self: center;
+}
+
+.vi-detail-row dd {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  text-align: right;
+  align-self: center;
+}
+
+/* Light mode */
+html.theme-light .vi-zone-card {
+  background: #f8fafc;
+}
+
+html.theme-light .vi-green  { box-shadow: 0 0 6px #4ade8044; }
+html.theme-light .vi-yellow { box-shadow: 0 0 6px #eab30844; }
+html.theme-light .vi-orange { box-shadow: 0 0 6px #f9731644; }
+html.theme-light .vi-red    { box-shadow: 0 0 6px #ef444444; }
   *,
   *::before,
   *::after {
