@@ -30,6 +30,12 @@
   --color-ok:    #4ade80;
   --color-error: #f87171;
 
+  /* Overlay panels (depth, timeline, counter) */
+  --color-overlay:        rgb(15 23 42 / 92%);
+  --color-overlay-border: rgb(255 255 255 / 0.06);
+  --color-chart-grid:     rgba(255, 255, 255, 0.06);
+  --color-hover-card:     #1e3a5f;
+
   /* Layout */
   --sidebar-width:    280px;
   --header-height:    56px;
@@ -509,7 +515,7 @@ ol {
 /* Leaflet overrides */
 .leaflet-container {
   font-family: var(--font-sans);
-  background: #1a2744;
+  background: var(--color-bg);
 }
 
 .leaflet-popup-content-wrapper {
@@ -726,7 +732,7 @@ ol {
 
 .latest-event-card:hover {
   border-color: var(--color-accent);
-  background: #1e3a5f;
+  background: var(--color-hover-card);
 }
 
 .latest-event-mag {
@@ -822,7 +828,7 @@ ol {
   left: 50%;
   transform: translateX(-50%);
   z-index: 500;
-  background: rgb(15 23 42 / 85%);
+  background: var(--color-overlay);
   color: var(--color-text);
   font-size: 0.75rem;
   font-weight: 600;
@@ -847,12 +853,12 @@ ol {
   display: none;   /* shown via JS */
   align-items: center;
   gap: var(--space-2);
-  background: rgb(15 23 42 / 92%);
+  background: var(--color-overlay);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   backdrop-filter: blur(6px);
-  box-shadow: 0 4px 20px rgb(0 0 0 / 50%);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 20%);
   min-width: 280px;
 }
 
@@ -930,6 +936,12 @@ html.theme-light {
   --color-focus:        #f59e0b;
   --color-ok:           #16a34a;
   --color-error:        #dc2626;
+
+  /* Overlay panels — light overrides */
+  --color-overlay:        rgb(255 255 255 / 94%);
+  --color-overlay-border: rgb(0 0 0 / 0.06);
+  --color-chart-grid:     rgba(0, 0, 0, 0.06);
+  --color-hover-card:     #dbeafe;
 }
 
 html.theme-light .leaflet-container {
@@ -994,7 +1006,7 @@ html.theme-light .leaflet-popup-tip {
   z-index: 600;
   display: none;
   flex-direction: column;
-  background: rgb(15 23 42 / 94%);
+  background: var(--color-overlay);
   border-top: 1px solid var(--color-border);
   backdrop-filter: blur(6px);
   padding: var(--space-2) var(--space-3);
