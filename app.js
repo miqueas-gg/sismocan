@@ -96,6 +96,9 @@ const SismocanApp = (() => {
   /** @type {Object|null} Datos GPS cargados de data/gps.json */
   let gpsData = null;
 
+  /** @type {Object|null} Datos SO₂ TROPOMI cargados de data/so2.json */
+  let so2Data = null;
+
   /**
    * Max `properties.time` (epoch ms) observed on the previous refresh cycle.
    * Used to detect genuinely new events between polls.
@@ -497,6 +500,18 @@ const SismocanApp = (() => {
       if (!res.ok) return;
       gpsData = await res.json();
     } catch { /* si no existe todavía, continuar sin GPS */ }
+  }
+
+  /**
+   * Carga data/so2.json una vez al día (o en el primer load).
+   * El archivo lo actualiza el workflow update_so2.yml usando Copernicus TROPOMI.
+   */
+  async function fetchSo2Data() {
+    try {
+      const res = await fetch(`data/so2.json?_=${Date.now()}`);
+      if (!res.ok) return;
+      so2Data = await res.json();
+    } catch { /* si no existe todavía, continuar sin SO₂ */ }
   }
 
   // -------------------------------------------------------------------------
@@ -1256,10 +1271,12 @@ const SismocanApp = (() => {
     bindFilterControls();
     initShareButtons();
     fetchGpsData();   // carga asíncrona; no bloquea el arranque
+    fetchSo2Data();   // carga asíncrona; no bloquea el arranque
     refresh();
     refreshTimer = setInterval(refresh, CONFIG.refreshIntervalMs);
     // Re-cargar GPS una vez al día (no hace falta más frecuencia)
     setInterval(fetchGpsData, 24 * 60 * 60_000);
+    setInterval(fetchSo2Data, 24 * 60 * 60_000);
 
     // Tarjeta del último seísmo → volar al mapa
     const latestCard = document.getElementById('latest-event-card');
@@ -1483,6 +1500,20 @@ const SismocanApp = (() => {
       }
     }
 
+    // 6 — SO₂ columna total TROPOMI (Copernicus Sentinel-5P)
+    detail.so2Du      = null;
+    detail.so2Anomaly = null;
+    if (so2Data && so2Data.zones && so2Data.zones[zone.id]) {
+      const zso2 = so2Data.zones[zone.id];
+      if (zso2.status === 'ok' && zso2.latest_du != null) {
+        detail.so2Du      = zso2.latest_du;
+        detail.so2Anomaly = zso2.anomaly;
+        const alertLvl    = zso2.alertLevel || 0;
+        if (alertLvl >= 2)      score += 2;
+        else if (alertLvl >= 1) score += 1;
+      }
+    }
+
     // Clamp a nivel 0–3
     const level = Math.min(3, Math.floor(score / 2));
     return { level, score, detail };
@@ -1552,6 +1583,24 @@ const SismocanApp = (() => {
           gpsEl.textContent = `${sign}${detail.gpsTrend.toFixed(2)} mm/d`;
           gpsEl.style.color = Math.abs(detail.gpsTrend) >= 2
             ? 'var(--mag-strong)' : 'inherit';
+        }
+      }
+
+      // SO₂ TROPOMI
+      const so2El = card.querySelector('.vi-detail-so2');
+      if (so2El) {
+        if (detail.so2Du == null) {
+          so2El.textContent = so2Data ? '—' : 'Sin datos aún';
+          so2El.style.color = 'inherit';
+        } else {
+          const anomStr = detail.so2Anomaly != null
+            ? ` (×${detail.so2Anomaly.toFixed(1)})` : '';
+          so2El.textContent = `${detail.so2Du.toFixed(1)} DU${anomStr}`;
+          so2El.style.color = detail.so2Du >= 30
+            ? 'var(--mag-strong)'
+            : detail.so2Du >= 10
+              ? 'var(--mag-mid)'
+              : 'inherit';
         }
       }
 
