@@ -573,7 +573,9 @@ const SismocanApp = (() => {
     if (isDepthViewOpen) {
       panel?.classList.add('is-visible');
       btn?.setAttribute('aria-pressed', 'true');
-      updateDepthChart(features);
+      // Defer until after the browser has reflowed the panel from display:none
+      // to display:flex; otherwise Chart.js reads canvas dimensions as 0.
+      requestAnimationFrame(() => updateDepthChart(features));
     } else {
       panel?.classList.remove('is-visible');
       btn?.setAttribute('aria-pressed', 'false');
@@ -585,6 +587,22 @@ const SismocanApp = (() => {
    * El color representa la magnitud.
    * @param {Array<Object>} features
    */
+  /**
+   * Lee los tokens de color del tema activo desde CSS custom properties.
+   * @returns {Object}
+   */
+  function getThemeTokens() {
+    const style = getComputedStyle(document.documentElement);
+    const get   = (v) => style.getPropertyValue(v).trim();
+    return {
+      surface:    get('--color-surface')    || '#1e293b',
+      text:       get('--color-text')       || '#f1f5f9',
+      textMuted:  get('--color-text-muted') || '#94a3b8',
+      border:     get('--color-border')     || '#334155',
+      chartGrid:  get('--color-chart-grid') || 'rgba(255,255,255,0.06)',
+    };
+  }
+
   function updateDepthChart(features) {
     const ctx = document.getElementById('chart-depth');
     if (!ctx || typeof Chart === 'undefined') return;
@@ -601,6 +619,8 @@ const SismocanApp = (() => {
       mag: f.properties.mag ?? 0,
     }));
 
+    const t = getThemeTokens();
+
     const data = {
       datasets: [{
         data:            points,
@@ -612,7 +632,17 @@ const SismocanApp = (() => {
     };
 
     if (depthChart) {
+      depthChart.resize();
       depthChart.data = data;
+      // Refresh theme-sensitive options in place
+      const t = getThemeTokens();
+      depthChart.options.plugins.tooltip.backgroundColor = t.surface;
+      depthChart.options.plugins.tooltip.titleColor      = t.text;
+      depthChart.options.plugins.tooltip.bodyColor       = t.textMuted;
+      depthChart.options.plugins.tooltip.borderColor     = t.border;
+      depthChart.options.scales.y.grid.color             = t.chartGrid;
+      depthChart.options.scales.y.ticks.color            = t.textMuted;
+      depthChart.options.scales.y.title.color            = t.textMuted;
       depthChart.update('none');
       return;
     }
@@ -633,10 +663,10 @@ const SismocanApp = (() => {
                 return `M${p.mag.toFixed(1)} · ${p.y} km · ${formatDate(p.x)}`;
               },
             },
-            backgroundColor: '#1e293b',
-            titleColor: '#f1f5f9',
-            bodyColor:  '#94a3b8',
-            borderColor: '#334155',
+            backgroundColor: t.surface,
+            titleColor:      t.text,
+            bodyColor:       t.textMuted,
+            borderColor:     t.border,
             borderWidth: 1,
           },
         },
@@ -647,10 +677,10 @@ const SismocanApp = (() => {
           },
           y: {
             display: true,
-            reverse: true,   // profundidad crece hacia abajo
-            grid: { color: 'rgba(255,255,255,0.06)' },
+            reverse: true,
+            grid: { color: t.chartGrid },
             ticks: {
-              color: '#94a3b8',
+              color: t.textMuted,
               font: { size: 10 },
               callback: (v) => `${v} km`,
               maxTicksLimit: 5,
@@ -658,7 +688,7 @@ const SismocanApp = (() => {
             title: {
               display: true,
               text: 'Profundidad (km)',
-              color: '#94a3b8',
+              color: t.textMuted,
               font: { size: 10 },
             },
           },
@@ -694,6 +724,18 @@ const SismocanApp = (() => {
       html.classList.remove('theme-light');
       if (btn) btn.textContent = '☀️';
       localStorage.setItem('sismocan-theme', 'dark');
+    }
+
+    // Destroy depth chart so it is recreated with the new theme colours
+    // next time the panel is opened (or immediately if it is already open).
+    if (depthChart) {
+      depthChart.destroy();
+      depthChart = null;
+    }
+    if (isDepthViewOpen) {
+      const filters  = getFilters();
+      const filtered = applyFilters(allFeatures, filters);
+      requestAnimationFrame(() => updateDepthChart(filtered));
     }
   }
 
