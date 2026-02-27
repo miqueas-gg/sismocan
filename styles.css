@@ -941,7 +941,7 @@ html.theme-light {
   --color-overlay:        rgb(255 255 255 / 94%);
   --color-overlay-border: rgb(0 0 0 / 0.06);
   --color-chart-grid:     rgba(0, 0, 0, 0.06);
-  --color-hover-card:     #dbeafe;
+  --color-hover-card:     #f0f9ff; /* sky-50: tono muy suave, apenas perceptible */
 }
 
 html.theme-light .leaflet-container {
