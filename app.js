@@ -43,6 +43,12 @@ const SismocanApp = (() => {
       days: '7',
       minMag: 0,
     },
+
+    /**
+     * Minimum magnitude for a new-event alert (toast + pulse ring on map).
+     * Change this value to raise or lower the notification threshold.
+     */
+    alertMinMag: 2.0,
   });
 
   // -------------------------------------------------------------------------
@@ -86,6 +92,19 @@ const SismocanApp = (() => {
     features: [],
     timer: null,
   };
+
+  /**
+   * Max `properties.time` (epoch ms) observed on the previous refresh cycle.
+   * Used to detect genuinely new events between polls.
+   * 0 on the very first load — alerts are suppressed until data is bootstrapped.
+   */
+  let lastKnownMaxTime = 0;
+
+  /** L.LayerGroup that holds animated pulse-ring markers for new events. */
+  let pulseLayerGroup = null;
+
+  /** Whether the audible alert sound is enabled. Toggle via the toast bell. */
+  let soundEnabled = true;
 
   // -------------------------------------------------------------------------
   // Magnitude helpers
@@ -184,6 +203,10 @@ const SismocanApp = (() => {
       showCoverageOnHover: false,
       chunkedLoading: true,
     }).addTo(map);
+
+    // Separate layer group for pulse-ring overlays on new events.
+    // Sits above all other layers so the rings are always visible.
+    pulseLayerGroup = L.layerGroup().addTo(map);
 
     // Force Leaflet to recalculate container dimensions once the DOM has fully
     // painted. Without this, percentage-based flex heights can yield a 0-px
@@ -439,8 +462,18 @@ const SismocanApp = (() => {
    * Called on init and every CONFIG.refreshIntervalMs milliseconds.
    */
   async function refresh() {
+    // Snapshot max event time before fetching so we can detect arrivals.
+    const isFirstLoad = allFeatures.length === 0;
+    const prevMaxTime = isFirstLoad
+      ? 0
+      : allFeatures.reduce((m, f) => Math.max(m, f.properties?.time ?? 0), 0);
+
     const ok = await fetchData();
     if (!ok) return;
+
+    // Alert only on real subsequent polls, not on the initial page load.
+    if (!isFirstLoad) checkForNewEvents(prevMaxTime);
+    else lastKnownMaxTime = allFeatures.reduce((m, f) => Math.max(m, f.properties?.time ?? 0), 0);
 
     const filters  = getFilters();
     const filtered = applyFilters(allFeatures, filters);
@@ -735,6 +768,147 @@ const SismocanApp = (() => {
       const filtered = applyFilters(allFeatures, filters);
       requestAnimationFrame(() => updateDepthChart(filtered));
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // New-event alerts  (toast + pulse ring)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Finds events that arrived after `prevMaxTime` and meet the magnitude
+   * threshold, then triggers the toast, pulse markers and optional sound.
+   * @param {number} prevMaxTime  epoch ms from before the latest fetchData()
+   */
+  function checkForNewEvents(prevMaxTime) {
+    const newEvents = allFeatures.filter(
+      (f) =>
+        (f.properties?.time ?? 0) > prevMaxTime &&
+        (f.properties?.mag  ?? 0) >= CONFIG.alertMinMag,
+    );
+    if (newEvents.length === 0) return;
+
+    newEvents.forEach(addPulseMarker);
+    showNewEventToast(newEvents);
+    playAlertSound();
+  }
+
+  /**
+   * Adds an animated concentric-ring DivIcon on top of the event's position.
+   * The rings expand and fade, then the marker is removed after 12 seconds.
+   * @param {Object} feature  GeoJSON feature
+   */
+  function addPulseMarker(feature) {
+    const coords = feature.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return;
+    const [lon, lat] = coords;
+    const color = getMagnitudeColor(feature.properties?.mag ?? 0);
+
+    const icon = L.divIcon({
+      className: 'pulse-icon',
+      html: `<div class="pulse-marker" style="--pulse-color:${color}">
+               <div class="pulse-ring"></div>
+               <div class="pulse-ring pulse-ring-2"></div>
+             </div>`,
+      iconSize:   [40, 40],
+      iconAnchor: [20, 20],
+    });
+
+    const marker = L.marker([lat, lon], {
+      icon,
+      interactive: false,
+      zIndexOffset: 2000,
+    });
+
+    if (pulseLayerGroup) pulseLayerGroup.addLayer(marker);
+
+    // Self-remove after the animation has run a few cycles.
+    setTimeout(() => pulseLayerGroup?.removeLayer(marker), 12_000);
+  }
+
+  /**
+   * Renders a slide-in toast card in the bottom-right corner.
+   * If only one event qualifies, shows its details; otherwise shows the
+   * highest-magnitude one with a count badge.
+   * @param {Array<Object>} events  The new qualifying features
+   */
+  function showNewEventToast(events) {
+    // Replace any existing toast so alerts don't stack.
+    document.getElementById('event-toast')?.remove();
+
+    const top = events.reduce((best, f) =>
+      (f.properties?.mag ?? 0) > (best.properties?.mag ?? 0) ? f : best,
+    events[0]);
+
+    const mag    = top.properties?.mag?.toFixed(1) ?? '—';
+    const place  = top.properties?.place || 'Ubicación desconocida';
+    const label  = getMagnitudeLabel(top.properties?.mag ?? 0);
+    const color  = getMagnitudeColor(top.properties?.mag ?? 0);
+    const count  = events.length;
+    const countBadge = count > 1 ? ` <span class="toast-badge">${count}</span>` : '';
+
+    const toast = document.createElement('div');
+    toast.id        = 'event-toast';
+    toast.className = 'event-toast';
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = `
+      <div class="event-toast-dot" style="--pulse-color:${color}"></div>
+      <div class="event-toast-body">
+        <strong>Nuevo seísmo M${mag} · ${label}${countBadge}</strong>
+        <span>${place}</span>
+      </div>
+      <button class="event-toast-sound" type="button"
+              title="${soundEnabled ? 'Silenciar alertas' : 'Activar sonido'}"
+              aria-label="${soundEnabled ? 'Silenciar alertas' : 'Activar sonido'}">
+        ${soundEnabled ? '🔔' : '🔕'}
+      </button>
+      <button class="event-toast-close" type="button" aria-label="Cerrar notificación">✕</button>
+    `;
+
+    toast.querySelector('.event-toast-sound').addEventListener('click', () => {
+      soundEnabled = !soundEnabled;
+      const btn = toast.querySelector('.event-toast-sound');
+      btn.textContent  = soundEnabled ? '🔔' : '🔕';
+      btn.title        = soundEnabled ? 'Silenciar alertas' : 'Activar sonido';
+      btn.setAttribute('aria-label', btn.title);
+    });
+
+    toast.querySelector('.event-toast-close').addEventListener('click', () => toast.remove());
+
+    document.body.appendChild(toast);
+
+    // Trigger slide-in on next frame so the CSS transition fires.
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+
+    // Auto-dismiss after 8 seconds.
+    setTimeout(() => {
+      toast.classList.remove('is-visible');
+      setTimeout(() => toast.remove(), 400);
+    }, 8_000);
+  }
+
+  /**
+   * Plays a short ascending three-note chime using the Web Audio API.
+   * Silently fails if the browser hasn't received a user gesture yet
+   * (AudioContext autoplay policy) or if soundEnabled is false.
+   */
+  function playAlertSound() {
+    if (!soundEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [[440, 0], [554, 0.18], [659, 0.36]].forEach(([freq, delay]) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type          = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+        gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + delay + 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.45);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.45);
+      });
+    } catch { /* AudioContext blocked or unavailable — fail silently */ }
   }
 
   // -------------------------------------------------------------------------
