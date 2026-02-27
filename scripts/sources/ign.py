@@ -24,6 +24,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
+try:
+    from bs4 import BeautifulSoup
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +42,10 @@ _PORTLET_PREFIX = (
 )
 
 IGN_CATALOG_URL = "https://www.ign.es/web/ign/portal/sis-catalogo-terremotos"
+IGN_TABLE_10DAYS_URL = (
+    "https://www.ign.es/web/ign/portal/vlc-ultimo-terremoto"
+    "/-/terremotos-canarias/get10dias"
+)
 IGN_DOWNLOAD_URL = (
     "https://www.ign.es/web/ign/portal/sis-catalogo-terremotos"
     "?p_p_id=IGNSISCatalogoTerremotos_WAR_IGNSISCatalogoTerremotosportlet"
@@ -326,3 +335,132 @@ def fetch_ign(start_date: str, end_date: str) -> list[dict[str, Any]]:
 
     log.error("[IGN] All download attempts failed.")
     return []
+
+
+# ---------------------------------------------------------------------------
+# Table scraper — last 10 days (HTML endpoint)
+# ---------------------------------------------------------------------------
+
+IGN_TABLE_COLUMNS = (
+    "evento", "fecha", "hora_utc", "latitud", "longitud",
+    "profundidad", "intensidad", "magnitud", "tipo_mag",
+    "localizacion", "mas_info",
+)
+
+
+def fetch_ign_table() -> list[dict[str, Any]]:
+    """
+    Scrape the IGN HTML table of the last 10 days of seismic activity
+    in the Canary Islands.
+
+    URL: https://www.ign.es/web/ign/portal/vlc-ultimo-terremoto/-/terremotos-canarias/get10dias
+
+    Returns a list of normalised GeoJSON feature dicts (sismocan schema).
+    Falls back to an empty list on any error.
+    """
+    if not _BS4_AVAILABLE:
+        log.error("[IGN-table] beautifulsoup4 is not installed. Run: pip install beautifulsoup4")
+        return []
+
+    url = IGN_TABLE_10DAYS_URL
+    log.info("[IGN-table] Fetching last-10-days table from %s", url)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.get(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (compatible; sismocan-bot/1.0; "
+                        "+https://github.com/miqueas-gg/sismocan)"
+                    ),
+                    "Accept-Language": "es-ES,es;q=0.9",
+                    "Accept": "text/html,*/*;q=0.8",
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            log.error("[IGN-table] Attempt %d/%d failed: %s", attempt, MAX_RETRIES, exc)
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_BACKOFF * attempt)
+    else:
+        log.error("[IGN-table] All attempts failed.")
+        return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    table = soup.find("table")
+    if table is None:
+        log.error("[IGN-table] No <table> found in response HTML.")
+        return []
+
+    features: list[dict[str, Any]] = []
+    rows = table.find_all("tr")
+    log.info("[IGN-table] Rows found (incl. header): %d", len(rows))
+
+    for row in rows:
+        cells = row.find_all("td")
+        if len(cells) < 10:
+            continue  # skip header or malformed rows
+
+        raw: dict[str, str] = {}
+        for i, col in enumerate(IGN_TABLE_COLUMNS):
+            raw[col] = cells[i].get_text(strip=True) if i < len(cells) else ""
+
+        # --- Coordinates ---
+        try:
+            lat = float(raw["latitud"])
+            lon = float(raw["longitud"])
+        except ValueError:
+            log.debug("[IGN-table] Skipping row with invalid coordinates: %s", raw)
+            continue
+
+        # --- Depth ---
+        try:
+            depth: float | None = float(raw["profundidad"])
+        except ValueError:
+            depth = None
+
+        # --- Magnitude ---
+        try:
+            mag: float | None = float(raw["magnitud"])
+        except ValueError:
+            mag = None
+
+        # --- Time ---
+        fecha = raw["fecha"]    # DD/MM/YYYY
+        hora  = raw["hora_utc"] # HH:MM:SS
+        epoch_ms = _parse_epoch_ms(f"{fecha} {hora}") if fecha and hora else None
+
+        # --- ID ---
+        raw_id = raw["evento"]
+        feature_id = (
+            f"ign_{raw_id}"
+            if raw_id and not raw_id.startswith("ign_")
+            else (raw_id or f"ign_{lon}_{lat}_{epoch_ms}")
+        )
+
+        coords: list[float] = [lon, lat]
+        if depth is not None:
+            coords.append(depth)
+
+        features.append({
+            "type": "Feature",
+            "id": feature_id,
+            "properties": {
+                "mag":    mag,
+                "place":  raw["localizacion"],
+                "time":   epoch_ms,
+                "depth":  depth,
+                "url":    None,
+                "source": "ign",
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": coords,
+            },
+        })
+
+    log.info("[IGN-table] Parsed %d features.", len(features))
+    return features

@@ -31,7 +31,7 @@ from typing import Any
 # executed directly and when imported from tests.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sources.ign import fetch_ign
+from sources.ign import fetch_ign, fetch_ign_table
 from sources.usgs import fetch_usgs
 
 # ---------------------------------------------------------------------------
@@ -45,6 +45,10 @@ HISTORY_START: str = "2015-01-01"
 
 # Look back slightly further than the last event to catch late-arriving data
 OVERLAP_MINUTES: int = 10
+
+# If the latest IGN event is within this many days, use the fast HTML-table
+# scraper instead of the Liferay portlet (which is currently unreliable).
+IGN_TABLE_LOOKBACK_DAYS: int = 10
 
 # For IGN historical fetch, split into monthly chunks to respect server limits
 IGN_CHUNK_MONTHS: int = 1
@@ -310,13 +314,24 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Source 2: IGN
     # ------------------------------------------------------------------
+    ign_features_all: list[dict] = []
     ign_windows = determine_ign_windows(existing)
+
+    # Use the faster/more reliable HTML-table scraper when we are within
+    # the 10-day look-back window it covers; fall back to the Liferay
+    # portlet endpoint for full historical ingestion.
+    ign_incremental = (len(ign_windows) == 1)
+    if ign_incremental:
+        log.info("[IGN] Incremental sync — using HTML-table scraper (last 10 days).")
+        ign_features_all = fetch_ign_table()
+    else:
+        log.info("[IGN] Historical sync — using portlet endpoint (%d windows).", len(ign_windows))
+        for start_dmy, end_dmy in ign_windows:
+            ign_features_all.extend(fetch_ign(start_dmy, end_dmy))
+
     ign_added_total = 0
-    for start_dmy, end_dmy in ign_windows:
-        ign_features = fetch_ign(start_dmy, end_dmy)
-        if ign_features:
-            existing, added = merge_by_id(existing, ign_features)
-            ign_added_total += added
+    if ign_features_all:
+        existing, ign_added_total = merge_by_id(existing, ign_features_all)
 
     log.info("[IGN] New features added (all windows): %d", ign_added_total)
     new_total += ign_added_total
