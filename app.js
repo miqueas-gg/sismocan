@@ -624,7 +624,6 @@ const SismocanApp = (() => {
     const data = {
       datasets: [{
         data:            points,
-        parsing:         { xAxisKey: 'x', yAxisKey: 'y' },
         pointBackgroundColor: points.map((p) => getMagnitudeColor(p.mag)),
         pointRadius:     points.map((p) => getMagnitudeRadius(p.mag) * 0.7),
         pointBorderWidth: 0,
@@ -635,7 +634,6 @@ const SismocanApp = (() => {
       depthChart.resize();
       depthChart.data = data;
       // Refresh theme-sensitive options in place
-      const t = getThemeTokens();
       depthChart.options.plugins.tooltip.backgroundColor = t.surface;
       depthChart.options.plugins.tooltip.titleColor      = t.text;
       depthChart.options.plugins.tooltip.bodyColor       = t.textMuted;
