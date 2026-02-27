@@ -93,6 +93,9 @@ const SismocanApp = (() => {
     timer: null,
   };
 
+  /** @type {Object|null} Datos GPS cargados de data/gps.json */
+  let gpsData = null;
+
   /**
    * Max `properties.time` (epoch ms) observed on the previous refresh cycle.
    * Used to detect genuinely new events between polls.
@@ -480,7 +483,20 @@ const SismocanApp = (() => {
 
     renderMarkers(filtered);
     updateStats(filtered);
+    updateVolcanicIndex(allFeatures);
     setStatusOk();
+  }
+
+  /**
+   * Carga data/gps.json una vez al día (o en el primer load).
+   * El archivo lo actualiza el workflow update_gps.yml.
+   */
+  async function fetchGpsData() {
+    try {
+      const res = await fetch(`data/gps.json?_=${Date.now()}`);
+      if (!res.ok) return;
+      gpsData = await res.json();
+    } catch { /* si no existe todavía, continuar sin GPS */ }
   }
 
   // -------------------------------------------------------------------------
@@ -1239,8 +1255,11 @@ const SismocanApp = (() => {
     initMap();
     bindFilterControls();
     initShareButtons();
+    fetchGpsData();   // carga asíncrona; no bloquea el arranque
     refresh();
     refreshTimer = setInterval(refresh, CONFIG.refreshIntervalMs);
+    // Re-cargar GPS una vez al día (no hace falta más frecuencia)
+    setInterval(fetchGpsData, 24 * 60 * 60_000);
 
     // Tarjeta del último seísmo → volar al mapa
     const latestCard = document.getElementById('latest-event-card');
@@ -1258,6 +1277,287 @@ const SismocanApp = (() => {
 
     // Comprobar si la URL tiene ?id= para abrir un seísmo directo
     checkUrlParam();
+  }
+
+  // -------------------------------------------------------------------------
+  // Volcanic activity index
+  // -------------------------------------------------------------------------
+
+  /**
+   * Zonas volcánicamente activas de Canarias.
+   * bounds: [latMin, latMax, lonMin, lonMax]
+   */
+  const VOLCANIC_ZONES = [
+    {
+      id:     'el-hierro',
+      name:   'El Hierro',
+      bounds: [27.55, 27.90, -18.25, -17.75],
+    },
+    {
+      id:     'la-palma',
+      name:   'La Palma',
+      bounds: [28.40, 28.90, -17.98, -17.70],
+    },
+    {
+      id:     'tenerife',
+      name:   'Tenerife · Teide',
+      bounds: [27.90, 28.60, -16.95, -16.10],
+    },
+  ];
+
+  /**
+   * Distancia haversine aproximada en km entre dos puntos.
+   */
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const R  = 6371;
+    const dL = (lat2 - lat1) * Math.PI / 180;
+    const dl = (lon2 - lon1) * Math.PI / 180;
+    const a  = Math.sin(dL / 2) ** 2 +
+               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+               Math.sin(dl / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  /**
+   * Devuelve los eventos dentro del bounding box de una zona.
+   */
+  function eventsInZone(features, zone) {
+    const { bounds } = zone;
+    return features.filter((f) => {
+      const [lon, lat] = f.geometry?.coordinates ?? [];
+      return (
+        lat >= bounds[0] && lat <= bounds[1] &&
+        lon >= bounds[2] && lon <= bounds[3]
+      );
+    });
+  }
+
+  /**
+   * Calcula el b-value (Gutenberg-Richter) de un conjunto de eventos.
+   * Usa el estimador de máxima verosimilitud (Aki 1965):
+   *   b = log10(e) / (mean_mag - Mc)
+   * donde Mc = magnitud de completitud (usamos el mínimo observado).
+   * Devuelve null si hay menos de 20 eventos.
+   */
+  function calcBValue(events) {
+    const mags = events.map((f) => f.properties?.mag ?? 0).filter((m) => m > 0);
+    if (mags.length < 20) return null;
+    const Mc      = Math.min(...mags);
+    const meanMag = mags.reduce((s, m) => s + m, 0) / mags.length;
+    if (meanMag <= Mc) return null;
+    return Math.LOG10E / (meanMag - Mc);
+  }
+
+  /**
+   * Calcula la tendencia de profundidad media: diferencia entre la media
+   * de los últimos 7 días y la de los 30 días anteriores (km).
+   * Negativo = los eventos recientes son más superficiales (señal de alerta).
+   */
+  function calcDepthTrend(events) {
+    const now      = Date.now();
+    const cut7     = now - 7  * 86_400_000;
+    const cut30    = now - 30 * 86_400_000;
+
+    const recent   = events.filter((f) => (f.properties?.time ?? 0) >= cut7)
+                           .map((f) => f.geometry?.coordinates?.[2])
+                           .filter((d) => d != null);
+    const baseline = events.filter((f) => {
+                       const t = f.properties?.time ?? 0;
+                       return t >= cut30 && t < cut7;
+                     }).map((f) => f.geometry?.coordinates?.[2])
+                       .filter((d) => d != null);
+
+    // Necesitamos al menos 3 eventos en cada ventana; si no hay actividad
+    // reciente devolvemos Infinity como señal de "sin eventos recientes".
+    if (baseline.length < 3) return null;
+    if (recent.length === 0) return Infinity;  // sin actividad en 7d
+    if (recent.length < 3)   return null;
+    const avg = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+    return avg(recent) - avg(baseline);  // negativo = más superficial
+  }
+
+  /**
+   * Calcula la energía sísmica acumulada en los últimos 7 días
+   * y la compara con la media de los 30 días anteriores (ratio).
+   * Fórmula: E = 10^(1.5·M + 4.8) julios.
+   */
+  function calcEnergyRatio(events) {
+    const now   = Date.now();
+    const cut7  = now - 7  * 86_400_000;
+    const cut30 = now - 30 * 86_400_000;
+
+    const energy = (feats) => feats.reduce((sum, f) => {
+      const m = f.properties?.mag ?? 0;
+      return sum + Math.pow(10, 1.5 * m + 4.8);
+    }, 0);
+
+    const e7  = energy(events.filter((f) => (f.properties?.time ?? 0) >= cut7));
+    const e30 = energy(events.filter((f) => {
+      const t = f.properties?.time ?? 0;
+      return t >= cut30 && t < cut7;
+    })) / 4;  // normalizar a 7 días equivalent
+
+    if (e30 === 0) return null;
+    return e7 / e30;
+  }
+
+  /**
+   * Detecta si hay un swarm activo: eventos en radio 20 km en las últimas
+   * 24h vs la media diaria histórica de la zona (últimos 90 días).
+   * Devuelve ratio actual/media (> 3 = swarm).
+   */
+  function calcSwarmRatio(events, zone) {
+    const now     = Date.now();
+    const cut24h  = now - 86_400_000;
+    const cut90d  = now - 90 * 86_400_000;
+
+    // Centro de la zona
+    const latC = (zone.bounds[0] + zone.bounds[1]) / 2;
+    const lonC = (zone.bounds[2] + zone.bounds[3]) / 2;
+
+    const inRadius = events.filter((f) => {
+      const [lon, lat] = f.geometry?.coordinates ?? [];
+      return haversineKm(lat, lon, latC, lonC) <= 20;
+    });
+
+    const last24h = inRadius.filter((f) => (f.properties?.time ?? 0) >= cut24h).length;
+    const last90d = inRadius.filter((f) => {
+      const t = f.properties?.time ?? 0;
+      return t >= cut90d && t < cut24h;
+    }).length;
+
+    const dailyAvg = last90d / 89;  // eventos/día en los 89 días previos
+    if (dailyAvg < 0.1) return last24h > 0 ? last24h / 0.1 : 0;
+    return last24h / dailyAvg;
+  }
+
+  /**
+   * Compone los 4 indicadores en un nivel de semáforo (0–3).
+   * Cada indicador contribuye 0–1 puntos; total 0–4 → nivel 0-3.
+   *
+   * Nivel 0 🟢 Verde    — actividad normal
+   * Nivel 1 🟡 Amarillo — actividad levemente elevada
+   * Nivel 2 🟠 Naranja  — actividad moderadamente elevada
+   * Nivel 3 🔴 Rojo     — actividad significativamente elevada
+   */
+  function computeZoneIndex(events, zone) {
+    let score    = 0;
+    const detail = {};
+
+    // 1 — b-value (b < 0.8 → +1; b < 0.6 → +2)
+    const bv = calcBValue(events);
+    detail.bValue = bv;
+    if (bv !== null) {
+      if (bv < 0.6)      score += 2;
+      else if (bv < 0.8) score += 1;
+    }
+
+    // 2 — migración de hipocentros (más superficial → alerta)
+    const dt = calcDepthTrend(events);
+    detail.depthTrend = dt;
+    if (dt !== null && dt !== Infinity && dt < -5)  score += 1;   // >5 km más superficial
+
+    // 3 — ratio de energía (> 3× la media → +1; > 10× → +2)
+    const er = calcEnergyRatio(events);
+    detail.energyRatio = er;
+    if (er !== null) {
+      if (er > 10)      score += 2;
+      else if (er > 3)  score += 1;
+    }
+
+    // 4 — swarm ratio (> 3× la media → +1; > 10× → +2)
+    const sr = calcSwarmRatio(events, zone);
+    detail.swarmRatio = sr;
+    if (sr > 10)      score += 2;
+    else if (sr > 3)  score += 1;
+
+    // 5 — GPS deformación vertical (si hay datos del NGL)
+    detail.gpsTrend = null;
+    if (gpsData && Array.isArray(gpsData.stations)) {
+      const sta = gpsData.stations.find((s) => s.zone === zone.id);
+      if (sta && sta.status === 'ok' && sta.trend30dMmPerDay != null) {
+        detail.gpsTrend = sta.trend30dMmPerDay;
+        const absT = Math.abs(sta.trend30dMmPerDay);
+        if (absT >= 5.0)      score += 2;  // deformación muy elevada
+        else if (absT >= 2.0) score += 1;  // deformación moderada
+      }
+    }
+
+    // Clamp a nivel 0–3
+    const level = Math.min(3, Math.floor(score / 2));
+    return { level, score, detail };
+  }
+
+  const LEVEL_META = [
+    { label: 'Verde',    emoji: '🟢', cls: 'vi-green',  desc: 'Actividad normal' },
+    { label: 'Amarillo', emoji: '🟡', cls: 'vi-yellow', desc: 'Actividad levemente elevada' },
+    { label: 'Naranja',  emoji: '🟠', cls: 'vi-orange', desc: 'Actividad moderada' },
+    { label: 'Rojo',     emoji: '🔴', cls: 'vi-red',    desc: 'Actividad significativa' },
+  ];
+
+  /**
+   * Renderiza el panel del índice volcánico en el sidebar.
+   * @param {Array<Object>} allFeats  Todos los features (sin filtrar por tiempo)
+   */
+  function updateVolcanicIndex(allFeats) {
+    VOLCANIC_ZONES.forEach((zone) => {
+      const card = document.getElementById(`vi-zone-${zone.id}`);
+      if (!card) return;
+
+      const zoneEvents = eventsInZone(allFeats, zone);
+      const { level, score, detail } = computeZoneIndex(zoneEvents, zone);
+      const meta = LEVEL_META[level];
+
+      // Semáforo
+      const dot = card.querySelector('.vi-dot');
+      if (dot) {
+        dot.className = `vi-dot ${meta.cls}`;
+        dot.title     = meta.desc;
+      }
+
+      // Texto de nivel
+      const lvlEl = card.querySelector('.vi-level-label');
+      if (lvlEl) lvlEl.textContent = `${meta.emoji} ${meta.label}`;
+
+      // Detalles técnicos (tooltip / expand)
+      const bvEl = card.querySelector('.vi-detail-bvalue');
+      const dtEl = card.querySelector('.vi-detail-depth');
+      const erEl = card.querySelector('.vi-detail-energy');
+      const srEl = card.querySelector('.vi-detail-swarm');
+      const evEl = card.querySelector('.vi-detail-events');
+
+      if (bvEl) bvEl.textContent = detail.bValue != null
+        ? detail.bValue.toFixed(2) : '—';
+      if (dtEl) {
+        if (detail.depthTrend === null) {
+          dtEl.textContent = '—';
+        } else if (detail.depthTrend === Infinity) {
+          dtEl.textContent = 'Sin actividad';
+        } else {
+          dtEl.textContent = `${detail.depthTrend > 0 ? '+' : ''}${detail.depthTrend.toFixed(1)} km`;
+        }
+      }
+      if (erEl) erEl.textContent = detail.energyRatio != null
+        ? `×${detail.energyRatio.toFixed(1)}` : '—';
+      if (srEl) srEl.textContent = `×${detail.swarmRatio.toFixed(1)}`;
+      if (evEl) evEl.textContent = zoneEvents.length.toLocaleString('es-ES');
+
+      // GPS deformación
+      const gpsEl = card.querySelector('.vi-detail-gps');
+      if (gpsEl) {
+        if (detail.gpsTrend == null) {
+          gpsEl.textContent = gpsData ? '—' : 'Sin datos aún';
+        } else {
+          const sign = detail.gpsTrend > 0 ? '+' : '';
+          gpsEl.textContent = `${sign}${detail.gpsTrend.toFixed(2)} mm/d`;
+          gpsEl.style.color = Math.abs(detail.gpsTrend) >= 2
+            ? 'var(--mag-strong)' : 'inherit';
+        }
+      }
+
+      // Clase de nivel en la tarjeta
+      card.dataset.level = level;
+    });
   }
 
   // Expose only what is needed externally

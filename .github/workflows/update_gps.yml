@@ -1,0 +1,43 @@
+name: Update GPS deformation data
+
+on:
+  schedule:
+    # Every day at 06:00 UTC — NGL publishes solutions with ~1-2 day delay
+    - cron: "0 6 * * *"
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-gps:
+    name: Fetch GPS time series from Nevada Geodetic Lab
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch GPS deformation data
+        run: python scripts/fetch_gps.py
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/gps.json
+          git diff --cached --quiet \
+            || git commit -m "data: update gps.json [skip ci]"
+          git push
