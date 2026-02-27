@@ -573,7 +573,9 @@ const SismocanApp = (() => {
     if (isDepthViewOpen) {
       panel?.classList.add('is-visible');
       btn?.setAttribute('aria-pressed', 'true');
-      updateDepthChart(features);
+      // Defer until after the browser has reflowed the panel from display:none
+      // to display:flex; otherwise Chart.js reads canvas dimensions as 0.
+      requestAnimationFrame(() => updateDepthChart(features));
     } else {
       panel?.classList.remove('is-visible');
       btn?.setAttribute('aria-pressed', 'false');
@@ -612,6 +614,7 @@ const SismocanApp = (() => {
     };
 
     if (depthChart) {
+      depthChart.resize();
       depthChart.data = data;
       depthChart.update('none');
       return;
