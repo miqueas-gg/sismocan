@@ -43,8 +43,10 @@ REPO_ROOT  = pathlib.Path(__file__).resolve().parent.parent
 OUTPUT_PATH = REPO_ROOT / "data" / "gps.json"
 
 # Umbrales de alerta (mm/día)
-THRESHOLD_MODERATE = 2.0   # tendencia elevada
-THRESHOLD_HIGH     = 5.0   # tendencia muy elevada
+# Valores conservadores: el fondo de ruido GPS es <0.1 mm/d;
+# 0.3 mm/d sostenidos ya es inusual; 1.0 mm/d es claramente anómalo.
+THRESHOLD_MODERATE = 0.3   # tendencia elevada
+THRESHOLD_HIGH     = 1.0   # tendencia muy elevada
 
 # ---------------------------------------------------------------------------
 # Descarga y parseo del formato tenv3
