@@ -1590,9 +1590,9 @@ const SismocanApp = (() => {
         const sign = gt > 0 ? '+' : '';
         const tip  = `Deformación: ${sign}${gt.toFixed(2)} mm/d`;
         const abs  = Math.abs(gt);
-        if (abs >= 5)   return { text: 'Deformación alta',     color: 'var(--mag-strong)', tip };
-        if (abs >= 2)   return { text: 'Deformación moderada', color: 'var(--mag-mid)',    tip };
-        return                 { text: 'Estable',              color: 'inherit',            tip };
+        if (abs >= 1.0) return { text: 'Deformación alta',     color: 'var(--mag-strong)', tip };
+        if (abs >= 0.3) return { text: 'Deformación moderada', color: 'var(--mag-mid)',    tip };
+        return                  { text: 'Estable',              color: 'inherit',            tip };
       }
       function so2Label(du, anomaly, hasData) {
         if (du == null) return { text: hasData ? '—' : 'Sin datos aún', color: 'inherit', tip: '' };
