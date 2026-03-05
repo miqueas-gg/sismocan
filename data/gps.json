@@ -1,27 +1,27 @@
 {
   "type": "gps_deformation",
-  "updated": "2026-03-05T06:14:16.033506Z",
+  "updated": "2026-03-05T14:11:59.395671Z",
   "stations": [
     {
       "zone": "el-hierro",
       "id": "HIER",
       "name": "El Hierro",
       "status": "error",
-      "error": "<urlopen error timed out>"
+      "error": "<urlopen error [WinError 10060] A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond>"
     },
     {
       "zone": "la-palma",
       "id": "LPAL",
       "name": "La Palma",
       "status": "error",
-      "error": "<urlopen error timed out>"
+      "error": "<urlopen error [WinError 10060] A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond>"
     },
     {
       "zone": "tenerife",
       "id": "TENE",
       "name": "Tenerife",
       "status": "error",
-      "error": "<urlopen error timed out>"
+      "error": "<urlopen error [WinError 10060] A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond>"
     }
   ]
 }
