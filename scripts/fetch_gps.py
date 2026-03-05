@@ -50,16 +50,26 @@ THRESHOLD_HIGH     = 5.0   # tendencia muy elevada
 # Descarga y parseo del formato tenv3
 # ---------------------------------------------------------------------------
 
-def fetch_tenv3(station_id: str, timeout: int = 45) -> str:
+def fetch_tenv3(station_id: str, timeout: int = 120, retries: int = 3) -> str:
     """
     Descarga el archivo tenv3 del NGL para la estación dada.
-    Lanza urllib.error.URLError si no se puede contactar el servidor,
-    o urllib.error.HTTPError si la estación no existe (404).
+    Reintenta hasta `retries` veces ante timeout o error de red.
+    Lanza la última excepción si todos los intentos fallan.
     """
+    import time as _time
     url = NGL_BASE.format(station=station_id)
-    print(f"  GET {url}", flush=True)
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"  GET {url} (intento {attempt}/{retries})", flush=True)
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            last_exc = exc
+            print(f"  AVISO: intento {attempt} fallido: {exc}", flush=True)
+            if attempt < retries:
+                _time.sleep(10)
+    raise last_exc
 
 
 def parse_tenv3(content: str) -> list[dict]:

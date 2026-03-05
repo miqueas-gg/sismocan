@@ -1298,6 +1298,14 @@ html.theme-light .event-toast {
   align-self: center;
 }
 
+/* Indica al usuario que hay un tooltip con el valor técnico */
+.vi-detail-row dd[title] {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--color-text-muted);
+  cursor: help;
+}
+
 /* Light mode */
 html.theme-light .vi-zone-card {
   background: #f8fafc;
