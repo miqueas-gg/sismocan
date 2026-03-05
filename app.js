@@ -1557,52 +1557,72 @@ const SismocanApp = (() => {
       const srEl = card.querySelector('.vi-detail-swarm');
       const evEl = card.querySelector('.vi-detail-events');
 
-      if (bvEl) bvEl.textContent = detail.bValue != null
-        ? detail.bValue.toFixed(2) : '—';
-      if (dtEl) {
-        if (detail.depthTrend === null) {
-          dtEl.textContent = '—';
-        } else if (detail.depthTrend === Infinity) {
-          dtEl.textContent = 'Sin actividad';
-        } else {
-          dtEl.textContent = `${detail.depthTrend > 0 ? '+' : ''}${detail.depthTrend.toFixed(1)} km`;
-        }
+      // Helpers: convierte valor técnico a etiqueta legible + color + tooltip
+      function bvalueLabel(bv) {
+        if (bv == null) return { text: '—', color: 'inherit', tip: '' };
+        const tip = `b-value: ${bv.toFixed(2)}`;
+        if (bv < 0.6) return { text: 'Bajo (alerta)', color: 'var(--mag-strong)', tip };
+        if (bv < 0.8) return { text: 'Bajo',           color: 'var(--mag-mid)',    tip };
+        return              { text: 'Normal',           color: 'inherit',           tip };
       }
-      if (erEl) erEl.textContent = detail.energyRatio != null
-        ? `×${detail.energyRatio.toFixed(1)}` : '—';
-      if (srEl) srEl.textContent = `×${detail.swarmRatio.toFixed(1)}`;
+      function depthLabel(dt) {
+        if (dt === null)     return { text: '—',             color: 'inherit',        tip: '' };
+        if (dt === Infinity) return { text: 'Sin actividad', color: 'inherit',        tip: '' };
+        const tip = `Tendencia: ${dt > 0 ? '+' : ''}${dt.toFixed(1)} km`;
+        if (dt < -5)  return { text: 'Ascendente',  color: 'var(--mag-mid)', tip };
+        return               { text: 'Estable',     color: 'inherit',        tip };
+      }
+      function energyLabel(er) {
+        if (er == null) return { text: '—', color: 'inherit', tip: '' };
+        const tip = `Ratio energía: ×${er.toFixed(1)}`;
+        if (er > 10) return { text: 'Muy elevada', color: 'var(--mag-strong)', tip };
+        if (er > 3)  return { text: 'Elevada',     color: 'var(--mag-mid)',    tip };
+        return              { text: 'Normal',       color: 'inherit',           tip };
+      }
+      function swarmLabel(sr) {
+        const tip = `Ratio enjambre: ×${sr.toFixed(1)}`;
+        if (sr > 10) return { text: 'Muy alto', color: 'var(--mag-strong)', tip };
+        if (sr > 3)  return { text: 'Alto',     color: 'var(--mag-mid)',    tip };
+        return              { text: 'Normal',   color: 'inherit',           tip };
+      }
+      function gpsLabel(gt, hasData) {
+        if (gt == null) return { text: hasData ? '—' : 'Sin datos aún', color: 'inherit', tip: '' };
+        const sign = gt > 0 ? '+' : '';
+        const tip  = `Deformación: ${sign}${gt.toFixed(2)} mm/d`;
+        const abs  = Math.abs(gt);
+        if (abs >= 5)   return { text: 'Deformación alta',     color: 'var(--mag-strong)', tip };
+        if (abs >= 2)   return { text: 'Deformación moderada', color: 'var(--mag-mid)',    tip };
+        return                 { text: 'Estable',              color: 'inherit',            tip };
+      }
+      function so2Label(du, anomaly, hasData) {
+        if (du == null) return { text: hasData ? '—' : 'Sin datos aún', color: 'inherit', tip: '' };
+        const anomStr = anomaly != null ? ` (×${anomaly.toFixed(1)})` : '';
+        const tip     = `SO₂: ${du.toFixed(2)} DU${anomStr}`;
+        if (du >= 30) return { text: 'Muy elevado', color: 'var(--mag-strong)', tip };
+        if (du >= 10) return { text: 'Elevado',     color: 'var(--mag-mid)',    tip };
+        return               { text: 'Normal',      color: 'inherit',           tip };
+      }
+
+      function applyLabel(el, { text, color, tip }) {
+        if (!el) return;
+        el.textContent = text;
+        el.style.color = color;
+        if (tip) el.title = tip; else el.removeAttribute('title');
+      }
+
+      applyLabel(bvEl, bvalueLabel(detail.bValue));
+      applyLabel(dtEl, depthLabel(detail.depthTrend));
+      applyLabel(erEl, energyLabel(detail.energyRatio));
+      applyLabel(srEl, swarmLabel(detail.swarmRatio));
       if (evEl) evEl.textContent = zoneEvents.length.toLocaleString('es-ES');
 
       // GPS deformación
       const gpsEl = card.querySelector('.vi-detail-gps');
-      if (gpsEl) {
-        if (detail.gpsTrend == null) {
-          gpsEl.textContent = gpsData ? '—' : 'Sin datos aún';
-        } else {
-          const sign = detail.gpsTrend > 0 ? '+' : '';
-          gpsEl.textContent = `${sign}${detail.gpsTrend.toFixed(2)} mm/d`;
-          gpsEl.style.color = Math.abs(detail.gpsTrend) >= 2
-            ? 'var(--mag-strong)' : 'inherit';
-        }
-      }
+      applyLabel(gpsEl, gpsLabel(detail.gpsTrend, !!gpsData));
 
       // SO₂ TROPOMI
       const so2El = card.querySelector('.vi-detail-so2');
-      if (so2El) {
-        if (detail.so2Du == null) {
-          so2El.textContent = so2Data ? '—' : 'Sin datos aún';
-          so2El.style.color = 'inherit';
-        } else {
-          const anomStr = detail.so2Anomaly != null
-            ? ` (×${detail.so2Anomaly.toFixed(1)})` : '';
-          so2El.textContent = `${detail.so2Du.toFixed(1)} DU${anomStr}`;
-          so2El.style.color = detail.so2Du >= 30
-            ? 'var(--mag-strong)'
-            : detail.so2Du >= 10
-              ? 'var(--mag-mid)'
-              : 'inherit';
-        }
-      }
+      applyLabel(so2El, so2Label(detail.so2Du, detail.so2Anomaly, !!so2Data));
 
       // Clase de nivel en la tarjeta
       card.dataset.level = level;

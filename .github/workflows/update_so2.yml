@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install openeo requests
+        run: pip install requests
 
       - name: Run fetch_so2.py
         env:
