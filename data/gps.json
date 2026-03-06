@@ -1,25 +1,48 @@
 {
   "type": "gps_deformation",
-  "updated": "2026-03-06T08:30:53.587018Z",
+  "updated": "2026-03-06T08:45:25.877565Z",
   "stations": [
     {
       "zone": "el-hierro",
-      "id": "HIER",
+      "id": "FRON",
       "name": "El Hierro",
-      "status": "error",
-      "error": "HTTP Error 404: Not Found"
+      "status": "stale",
+      "lastDate": "2024-08-24",
+      "lastUpMm": 452.87,
+      "dataAgeDays": 559,
+      "trend30dMmPerDay": null,
+      "trend90dMmPerDay": null,
+      "direction": null,
+      "alertLevel": 0,
+      "nPoints": 4892
     },
     {
       "zone": "la-palma",
       "id": "LPAL",
       "name": "La Palma",
-      "status": "no_data"
+      "status": "stale",
+      "lastDate": "2024-08-24",
+      "lastUpMm": 187.72,
+      "dataAgeDays": 559,
+      "trend30dMmPerDay": null,
+      "trend90dMmPerDay": null,
+      "direction": null,
+      "alertLevel": 0,
+      "nPoints": 8381
     },
     {
       "zone": "tenerife",
-      "id": "TENE",
+      "id": "TN02",
       "name": "Tenerife",
-      "status": "no_data"
+      "status": "stale",
+      "lastDate": "2024-08-24",
+      "lastUpMm": 416.77,
+      "dataAgeDays": 559,
+      "trend30dMmPerDay": null,
+      "trend90dMmPerDay": null,
+      "direction": null,
+      "alertLevel": 0,
+      "nPoints": 5158
     }
   ]
 }
