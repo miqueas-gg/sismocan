@@ -33,9 +33,9 @@ NGL_BASE = "https://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3"
 # Estaciones IGN permanentes en Canarias procesadas por el NGL.
 # IDs de 4 caracteres según el catálogo de estaciones NGL.
 STATIONS = [
-    {"zone": "el-hierro", "id": "HIER", "name": "El Hierro"},
+    {"zone": "el-hierro", "id": "FRON", "name": "El Hierro"},
     {"zone": "la-palma",  "id": "LPAL", "name": "La Palma"},
-    {"zone": "tenerife",  "id": "TENE", "name": "Tenerife"},
+    {"zone": "tenerife",  "id": "TN02", "name": "Tenerife"},
 ]
 
 # Ruta de salida relativa a la raíz del repositorio
@@ -76,28 +76,34 @@ def fetch_tenv3(station_id: str, timeout: int = 120, retries: int = 3) -> str:
 
 def parse_tenv3(content: str) -> list[dict]:
     """
-    Parsea el contenido de un archivo .tenv3 y devuelve una lista de entradas
-    ordenadas por fecha, cada una con:
-        date   : str  ISO 8601 (YYYY-MM-DD)
+    Parsea el contenido de un archivo .tenv3 (formato NGL IGS14) y devuelve
+    una lista de entradas ordenadas por fecha, cada una con:
+        date   : datetime.date  ISO 8601
         up_mm  : float  desplazamiento vertical en mm vs época de referencia
         su_mm  : float  incertidumbre formal (1σ) en mm
+
+    Formato de columnas (0-indexado):
+        0  site
+        1  YYMMMDD  (ej. 01MAY10)
+        2  yyyy.yyyy
+        ....
+        12 ____up(m)   ← desplazamiento vertical
+        16 sig_u(m)    ← incertidumbre vertical
+
     Ignora líneas de cabecera y valores con incertidumbre > 50 mm (outliers).
     """
     rows = []
     for line in content.splitlines():
         parts = line.split()
-        # Cabeceras y líneas vacías
-        if len(parts) < 12 or not parts[1].isdigit():
+        # Cabecera: primera columna es 'site' (texto), ignorar
+        if len(parts) < 17 or parts[0] == 'site':
             continue
         try:
-            date_str = parts[1]        # YYYYMMDD
-            up_m     = float(parts[8]) # vertical (Up), metros
-            su_m     = float(parts[11])# incertidumbre Up, metros
+            # Fecha en formato YYMMMDD (ej. "01MAY10" → 2001-05-10)
+            date = datetime.datetime.strptime(parts[1], "%y%b%d").date()
 
-            year  = int(date_str[0:4])
-            month = int(date_str[4:6])
-            day   = int(date_str[6:8])
-            date  = datetime.date(year, month, day)
+            up_m  = float(parts[12])  # columna ____up(m)
+            su_m  = float(parts[16])  # columna sig_u(m)
 
             up_mm = up_m * 1000.0
             su_mm = su_m * 1000.0
@@ -167,6 +173,10 @@ def process_station(station: dict) -> dict:
         trend_90d = linear_trend_mm_per_day(rows, 90)
         last      = rows[-1]
 
+        # Datos desactualizados si el último punto es de hace > 90 días
+        data_age_days = (datetime.date.today() - last["date"]).days
+        is_stale      = data_age_days > 90
+
         # Nivel de alerta basado en tendencia de 30 días
         if trend_30d is None:
             alert_level = 0
@@ -184,9 +194,10 @@ def process_station(station: dict) -> dict:
 
         return {
             **base,
-            "status":           "ok",
+            "status":           "stale" if is_stale else "ok",
             "lastDate":         last["date"].isoformat(),
             "lastUpMm":         round(last["up_mm"], 2),
+            "dataAgeDays":      data_age_days,
             "trend30dMmPerDay": round(trend_30d, 4) if trend_30d is not None else None,
             "trend90dMmPerDay": round(trend_90d, 4) if trend_90d is not None else None,
             "direction":        direction,
