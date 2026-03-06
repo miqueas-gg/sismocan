@@ -1,18 +1,19 @@
 {
   "type": "gps_deformation",
-  "updated": "2026-03-06T08:45:25.877565Z",
+  "updated": "2026-03-06T09:28:25.795491Z",
   "stations": [
     {
       "zone": "el-hierro",
       "id": "FRON",
       "name": "El Hierro",
       "status": "stale",
+      "source": "NGL (FRON)",
       "lastDate": "2024-08-24",
       "lastUpMm": 452.87,
       "dataAgeDays": 559,
-      "trend30dMmPerDay": null,
-      "trend90dMmPerDay": null,
-      "direction": null,
+      "trend30dMmPerDay": 0.2285,
+      "trend90dMmPerDay": -0.0677,
+      "direction": "stable",
       "alertLevel": 0,
       "nPoints": 4892
     },
@@ -21,28 +22,30 @@
       "id": "LPAL",
       "name": "La Palma",
       "status": "stale",
-      "lastDate": "2024-08-24",
-      "lastUpMm": 187.72,
-      "dataAgeDays": 559,
-      "trend30dMmPerDay": null,
-      "trend90dMmPerDay": null,
-      "direction": null,
+      "source": "EUREF EPN (LPAL_81701M001.dat)",
+      "lastDate": "2025-09-27",
+      "lastUpMm": -2.3,
+      "dataAgeDays": 160,
+      "trend30dMmPerDay": 0.1717,
+      "trend90dMmPerDay": -0.0232,
+      "direction": "stable",
       "alertLevel": 0,
-      "nPoints": 8381
+      "nPoints": 8734
     },
     {
       "zone": "tenerife",
-      "id": "TN02",
+      "id": "IZAN",
       "name": "Tenerife",
       "status": "stale",
-      "lastDate": "2024-08-24",
-      "lastUpMm": 416.77,
-      "dataAgeDays": 559,
-      "trend30dMmPerDay": null,
-      "trend90dMmPerDay": null,
-      "direction": null,
+      "source": "EUREF EPN (IZAN_31309M002.dat)",
+      "lastDate": "2025-09-27",
+      "lastUpMm": -0.6,
+      "dataAgeDays": 160,
+      "trend30dMmPerDay": 0.0222,
+      "trend90dMmPerDay": -0.005,
+      "direction": "stable",
       "alertLevel": 0,
-      "nPoints": 5158
+      "nPoints": 6232
     }
   ]
 }
