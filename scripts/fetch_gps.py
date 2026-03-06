@@ -28,7 +28,7 @@ import urllib.request
 # Configuración
 # ---------------------------------------------------------------------------
 
-NGL_BASE = "http://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3"
+NGL_BASE = "https://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3"
 
 # Estaciones IGN permanentes en Canarias procesadas por el NGL.
 # IDs de 4 caracteres según el catálogo de estaciones NGL.
