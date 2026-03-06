@@ -35,7 +35,7 @@ NGL_BASE = "https://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3"
 STATIONS = [
     {"zone": "el-hierro", "id": "FRON", "name": "El Hierro"},
     {"zone": "la-palma",  "id": "LPAL", "name": "La Palma"},
-    {"zone": "tenerife",  "id": "TN02", "name": "Tenerife"},
+    {"zone": "tenerife",  "id": "IZAN", "name": "Tenerife"},
 ]
 
 # Ruta de salida relativa a la raíz del repositorio
