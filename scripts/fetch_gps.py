@@ -1,14 +1,19 @@
 """
 fetch_gps.py — sismocan GPS deformation monitor
 ================================================
-Descarga las series temporales GPS del Nevada Geodetic Laboratory (NGL,
-Universidad de Nevada) para las estaciones permanentes IGN en las islas
+Descarga las series temporales GPS de la Red Permanente Europea (EPN) del
+EUREF Permanent GNSS Network para las estaciones permanentes IGN en las islas
 volcánicas de Canarias y calcula la tendencia de desplazamiento vertical
 reciente.
 
-Fuente de datos: http://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/
-Formato:        .tenv3  (columnas separadas por espacio; vertical en metros)
-Actualizacion:  NGL publica soluciones diarias con ~1–2 días de retardo.
+Fuente primaria:  https://epncb.oma.be/pub/station/coord/EPN/Time_Series/
+Formato EUREF:    .dat  columnas: GPS_week  N_res  N_sig  E_res  E_sig  U_res  U_sig  (mm)
+                  Los valores son residuos sobre una tendencia lineal a largo plazo.
+Actualización:    EUREF publica soluciones semanales con soluciones diarias integradas.
+Licencia:         CC-BY-4.0
+
+Fuente fallback:  NGL (Nevada Geodetic Lab) para El Hierro (no disponible en EUREF)
+URL:              https://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3
 
 Salida: data/gps.json
 
@@ -28,38 +33,57 @@ import urllib.request
 # Configuración
 # ---------------------------------------------------------------------------
 
+# Fuente primaria: EUREF EPN Time Series
+EUREF_BASE = "https://epncb.oma.be/pub/station/coord/EPN/Time_Series/{filename}"
+
+# Fuente fallback: NGL (solo para estaciones no disponibles en EUREF)
 NGL_BASE = "https://geodesy.unr.edu/gps_timeseries/tenv3/IGS14/{station}.tenv3"
 
-# Estaciones IGN permanentes en Canarias procesadas por el NGL.
-# IDs de 4 caracteres según el catálogo de estaciones NGL.
+# Época GPS (origen para convertir GPS week a fecha calendario)
+GPS_EPOCH = datetime.date(1980, 1, 6)
+
+# Estaciones: EUREF tiene LPAL y IZAN; El Hierro solo en NGL.
+# "euref_file" → nombre del .dat en el directorio Time_Series de EUREF
+# "ngl_id"     → ID de 4 caracteres en NGL (solo si no hay EUREF)
 STATIONS = [
-    {"zone": "el-hierro", "id": "FRON", "name": "El Hierro"},
-    {"zone": "la-palma",  "id": "LPAL", "name": "La Palma"},
-    {"zone": "tenerife",  "id": "IZAN", "name": "Tenerife"},
+    {
+        "zone":       "el-hierro",
+        "id":         "FRON",
+        "name":       "El Hierro",
+        "source":     "ngl",
+        "ngl_id":     "FRON",
+    },
+    {
+        "zone":       "la-palma",
+        "id":         "LPAL",
+        "name":       "La Palma",
+        "source":     "euref",
+        "euref_file": "LPAL_81701M001.dat",
+    },
+    {
+        "zone":       "tenerife",
+        "id":         "IZAN",
+        "name":       "Tenerife",
+        "source":     "euref",
+        "euref_file": "IZAN_31309M002.dat",
+    },
 ]
 
 # Ruta de salida relativa a la raíz del repositorio
-REPO_ROOT  = pathlib.Path(__file__).resolve().parent.parent
+REPO_ROOT   = pathlib.Path(__file__).resolve().parent.parent
 OUTPUT_PATH = REPO_ROOT / "data" / "gps.json"
 
 # Umbrales de alerta (mm/día)
-# Valores conservadores: el fondo de ruido GPS es <0.1 mm/d;
-# 0.3 mm/d sostenidos ya es inusual; 1.0 mm/d es claramente anómalo.
 THRESHOLD_MODERATE = 0.3   # tendencia elevada
 THRESHOLD_HIGH     = 1.0   # tendencia muy elevada
 
 # ---------------------------------------------------------------------------
-# Descarga y parseo del formato tenv3
+# Descarga genérica con reintentos
 # ---------------------------------------------------------------------------
 
-def fetch_tenv3(station_id: str, timeout: int = 120, retries: int = 3) -> str:
-    """
-    Descarga el archivo tenv3 del NGL para la estación dada.
-    Reintenta hasta `retries` veces ante timeout o error de red.
-    Lanza la última excepción si todos los intentos fallan.
-    """
+def fetch_url(url: str, timeout: int = 120, retries: int = 3) -> str:
+    """Descarga texto de una URL con reintentos ante fallos de red."""
     import time as _time
-    url = NGL_BASE.format(station=station_id)
     last_exc = None
     for attempt in range(1, retries + 1):
         try:
@@ -74,43 +98,44 @@ def fetch_tenv3(station_id: str, timeout: int = 120, retries: int = 3) -> str:
     raise last_exc
 
 
-def parse_tenv3(content: str) -> list[dict]:
+# ---------------------------------------------------------------------------
+# Parseo del formato EUREF .dat
+# ---------------------------------------------------------------------------
+
+def gps_week_to_date(gps_week_float: float) -> datetime.date:
     """
-    Parsea el contenido de un archivo .tenv3 (formato NGL IGS14) y devuelve
-    una lista de entradas ordenadas por fecha, cada una con:
-        date   : datetime.date  ISO 8601
-        up_mm  : float  desplazamiento vertical en mm vs época de referencia
-        su_mm  : float  incertidumbre formal (1σ) en mm
+    Convierte GPS week (float, p.ej. 2384.286) a fecha calendario.
+    El número entero es la semana GPS, la fracción el día de la semana (0=domingo).
+    """
+    total_days = round(gps_week_float * 7)
+    return GPS_EPOCH + datetime.timedelta(days=total_days)
 
-    Formato de columnas (0-indexado):
-        0  site
-        1  YYMMMDD  (ej. 01MAY10)
-        2  yyyy.yyyy
-        ....
-        12 ____up(m)   ← desplazamiento vertical
-        16 sig_u(m)    ← incertidumbre vertical
 
-    Ignora líneas de cabecera y valores con incertidumbre > 50 mm (outliers).
+def parse_euref_dat(content: str) -> list[dict]:
+    """
+    Parsea el contenido de un archivo .dat de la serie temporal EUREF/EPN.
+
+    Formato (README_TS_FORMAT.txt):
+        GPS_week  N_res  N_sig  E_res  E_sig  U_res  U_sig   (mm)
+
+    Devuelve lista de dicts con {date, up_mm, su_mm} ordenada por fecha.
+    Rechaza filas con sigma_U > 50 mm (outliers / periodos sin solución).
     """
     rows = []
     for line in content.splitlines():
         parts = line.split()
-        # Cabecera: primera columna es 'site' (texto), ignorar
-        if len(parts) < 17 or parts[0] == 'site':
+        if len(parts) < 7:
             continue
         try:
-            # Fecha en formato YYMMMDD (ej. "01MAY10" → 2001-05-10)
-            date = datetime.datetime.strptime(parts[1], "%y%b%d").date()
-
-            up_m  = float(parts[12])  # columna ____up(m)
-            su_m  = float(parts[16])  # columna sig_u(m)
-
-            up_mm = up_m * 1000.0
-            su_mm = su_m * 1000.0
-
-            if su_mm > 50:    # outlier — rechazar
+            gps_week = float(parts[0])
+            # Sanidad: semanas GPS razonables (post-1994 hasta 2050)
+            if not (700 <= gps_week <= 3700):
                 continue
-
+            date  = gps_week_to_date(gps_week)
+            up_mm = float(parts[5])   # U_res en mm
+            su_mm = float(parts[6])   # U_sig en mm
+            if su_mm > 50:
+                continue
             rows.append({"date": date, "up_mm": up_mm, "su_mm": su_mm})
         except (ValueError, IndexError):
             continue
@@ -120,18 +145,62 @@ def parse_tenv3(content: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Parseo del formato NGL .tenv3 (fallback para El Hierro)
+# ---------------------------------------------------------------------------
+
+def fetch_tenv3(station_id: str) -> str:
+    url = NGL_BASE.format(station=station_id)
+    return fetch_url(url)
+
+
+def parse_tenv3(content: str) -> list[dict]:
+    """
+    Parsea el contenido de un archivo .tenv3 (formato NGL IGS14).
+
+    Formato de columnas (0-indexado):
+        0  site
+        1  YYMMMDD  (ej. 01MAY10)
+        12 ____up(m)
+        16 sig_u(m)
+    """
+    rows = []
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) < 17 or parts[0] == 'site':
+            continue
+        try:
+            date  = datetime.datetime.strptime(parts[1], "%y%b%d").date()
+            up_mm = float(parts[12]) * 1000.0
+            su_mm = float(parts[16]) * 1000.0
+            if su_mm > 50:
+                continue
+            rows.append({"date": date, "up_mm": up_mm, "su_mm": su_mm})
+        except (ValueError, IndexError):
+            continue
+    rows.sort(key=lambda r: r["date"])
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Cálculo de tendencia (regresión lineal mínimos cuadrados)
 # ---------------------------------------------------------------------------
 
-def linear_trend_mm_per_day(rows, lookback_days):
+def linear_trend_mm_per_day(rows: list, lookback_days: int):
     """
     Calcula la tendencia lineal (mm/día) del desplazamiento vertical en la
-    ventana de los últimos `lookback_days` días.
+    ventana de los últimos `lookback_days` días DESDE EL ÚLTIMO PUNTO DE DATOS.
+
+    Se mide desde el dato más reciente hacia atrás, no desde hoy, para que la
+    tendencia sea siempre calculable aunque los datos tengan cierto desfase
+    (p.ej., EUREF EPN tiene retraso de ~4-5 meses en su producto final).
+
     Devuelve None si hay menos de 5 puntos en la ventana.
     """
-    today   = datetime.date.today()
-    cutoff  = today - datetime.timedelta(days=lookback_days)
-    window  = [r for r in rows if r["date"] >= cutoff]
+    if not rows:
+        return None
+    last_date = rows[-1]["date"]
+    cutoff    = last_date - datetime.timedelta(days=lookback_days)
+    window    = [r for r in rows if r["date"] >= cutoff]
 
     if len(window) < 5:
         return None
@@ -139,16 +208,12 @@ def linear_trend_mm_per_day(rows, lookback_days):
     xs = [(r["date"] - cutoff).days for r in window]
     ys = [r["up_mm"]               for r in window]
     n  = len(xs)
-
     mx = sum(xs) / n
     my = sum(ys) / n
     num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     den = sum((x - mx) ** 2        for x in xs)
 
-    if den == 0:
-        return None
-
-    return num / den   # mm/día
+    return num / den if den != 0 else None   # mm/día
 
 
 # ---------------------------------------------------------------------------
@@ -163,11 +228,19 @@ def process_station(station: dict) -> dict:
     base = {"zone": station["zone"], "id": station["id"], "name": station["name"]}
 
     try:
-        raw   = fetch_tenv3(station["id"])
-        rows  = parse_tenv3(raw)
+        # --- Descarga y parseo según fuente ---
+        if station["source"] == "euref":
+            url  = EUREF_BASE.format(filename=station["euref_file"])
+            raw  = fetch_url(url)
+            rows = parse_euref_dat(raw)
+            source_label = f"EUREF EPN ({station['euref_file']})"
+        else:
+            raw  = fetch_tenv3(station["ngl_id"])
+            rows = parse_tenv3(raw)
+            source_label = f"NGL ({station['ngl_id']})"
 
         if not rows:
-            return {**base, "status": "no_data"}
+            return {**base, "status": "no_data", "source": source_label}
 
         trend_30d = linear_trend_mm_per_day(rows, 30)
         trend_90d = linear_trend_mm_per_day(rows, 90)
@@ -187,7 +260,7 @@ def process_station(station: dict) -> dict:
         else:
             alert_level = 0
 
-        # Dirección de la tendencia (positivo = alzamiento, negativo = subsidencia)
+        # Dirección de la tendencia
         direction = None
         if trend_30d is not None:
             direction = "up" if trend_30d > 0.5 else ("down" if trend_30d < -0.5 else "stable")
@@ -195,6 +268,7 @@ def process_station(station: dict) -> dict:
         return {
             **base,
             "status":           "stale" if is_stale else "ok",
+            "source":           source_label,
             "lastDate":         last["date"].isoformat(),
             "lastUpMm":         round(last["up_mm"], 2),
             "dataAgeDays":      data_age_days,
@@ -215,22 +289,24 @@ def process_station(station: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print("=== fetch_gps.py — Nevada Geodetic Lab ===")
+    print("=== fetch_gps.py — EUREF EPN + NGL fallback ===")
     results = []
     for station in STATIONS:
-        print(f"\n[{station['id']}] {station['name']}")
+        print(f"\n[{station['id']}] {station['name']} (fuente: {station['source'].upper()})")
         r = process_station(station)
         results.append(r)
-        if r["status"] == "ok":
+        if r["status"] in ("ok", "stale"):
             t = r.get("trend30dMmPerDay")
             t_str = f"{t:+.2f} mm/día" if t is not None else "—"
-            print(f"  → tendencia 30d: {t_str}  |  nivel alerta: {r['alertLevel']}  |  n={r['nPoints']}")
+            age   = r.get("dataAgeDays", "?")
+            print(f"  → tendencia 30d: {t_str}  |  nivel alerta: {r['alertLevel']}  "
+                  f"|  edad datos: {age}d  |  n={r['nPoints']}  |  status: {r['status']}")
         else:
             print(f"  → status: {r['status']}")
 
     output = {
-        "type":    "gps_deformation",
-        "updated": datetime.datetime.utcnow().isoformat() + "Z",
+        "type":     "gps_deformation",
+        "updated":  datetime.datetime.utcnow().isoformat() + "Z",
         "stations": results,
     }
 
