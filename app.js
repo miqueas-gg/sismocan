@@ -1490,13 +1490,16 @@ const SismocanApp = (() => {
 
     // 5 — GPS deformación vertical (si hay datos del NGL)
     detail.gpsTrend = null;
+    detail.gpsStale = false;
     if (gpsData && Array.isArray(gpsData.stations)) {
       const sta = gpsData.stations.find((s) => s.zone === zone.id);
-      if (sta && sta.status === 'ok' && sta.trend30dMmPerDay != null) {
+      if (sta && sta.status === 'stale') {
+        detail.gpsStale = true;
+      } else if (sta && sta.status === 'ok' && sta.trend30dMmPerDay != null) {
         detail.gpsTrend = sta.trend30dMmPerDay;
         const absT = Math.abs(sta.trend30dMmPerDay);
-        if (absT >= 5.0)      score += 2;  // deformación muy elevada
-        else if (absT >= 2.0) score += 1;  // deformación moderada
+        if (absT >= 1.0)      score += 2;  // deformación muy elevada
+        else if (absT >= 0.3) score += 1;  // deformación moderada
       }
     }
 
@@ -1585,7 +1588,8 @@ const SismocanApp = (() => {
         if (sr > 3)  return { text: 'Alto',     color: 'var(--mag-mid)',    tip };
         return              { text: 'Normal',   color: 'inherit',           tip };
       }
-      function gpsLabel(gt, hasData) {
+      function gpsLabel(gt, hasData, isStale) {
+        if (isStale)   return { text: 'Sin datos recientes', color: 'var(--color-text-muted)', tip: 'La estación GPS no tiene datos recientes (>90 días)' };
         if (gt == null) return { text: hasData ? '—' : 'Sin datos aún', color: 'inherit', tip: '' };
         const sign = gt > 0 ? '+' : '';
         const tip  = `Deformación: ${sign}${gt.toFixed(2)} mm/d`;
@@ -1618,7 +1622,7 @@ const SismocanApp = (() => {
 
       // GPS deformación
       const gpsEl = card.querySelector('.vi-detail-gps');
-      applyLabel(gpsEl, gpsLabel(detail.gpsTrend, !!gpsData));
+      applyLabel(gpsEl, gpsLabel(detail.gpsTrend, !!gpsData, detail.gpsStale));
 
       // SO₂ TROPOMI
       const so2El = card.querySelector('.vi-detail-so2');
