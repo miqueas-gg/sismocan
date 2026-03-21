@@ -1,6 +1,6 @@
 {
   "type": "gps_deformation",
-  "updated": "2026-03-20T00:34:10.274045Z",
+  "updated": "2026-03-21T00:31:16.772996Z",
   "stations": [
     {
       "zone": "el-hierro",
@@ -13,16 +13,8 @@
       "zone": "la-palma",
       "id": "LPAL",
       "name": "La Palma",
-      "status": "stale",
-      "source": "EUREF EPN (LPAL_81701M001.dat)",
-      "lastDate": "2025-09-27",
-      "lastUpMm": -2.3,
-      "dataAgeDays": 174,
-      "trend30dMmPerDay": 0.1717,
-      "trend90dMmPerDay": -0.0232,
-      "direction": "stable",
-      "alertLevel": 0,
-      "nPoints": 8734
+      "status": "error",
+      "error": "<urlopen error [Errno 104] Connection reset by peer>"
     },
     {
       "zone": "tenerife",
@@ -32,7 +24,7 @@
       "source": "EUREF EPN (IZAN_31309M002.dat)",
       "lastDate": "2025-09-27",
       "lastUpMm": -0.6,
-      "dataAgeDays": 174,
+      "dataAgeDays": 175,
       "trend30dMmPerDay": 0.0222,
       "trend90dMmPerDay": -0.005,
       "direction": "stable",
