@@ -1,6 +1,6 @@
 {
   "type": "gps_deformation",
-  "updated": "2026-09-03T00:34:53.826335Z",
+  "updated": "2026-09-04T00:31:39.822044Z",
   "stations": [
     {
       "zone": "el-hierro",
@@ -17,7 +17,7 @@
       "source": "EUREF EPN (LPAL_81701M001.dat)",
       "lastDate": "2026-01-10",
       "lastUpMm": 1.3,
-      "dataAgeDays": 236,
+      "dataAgeDays": 237,
       "trend30dMmPerDay": -0.184,
       "trend90dMmPerDay": 0.0249,
       "direction": "stable",
@@ -32,7 +32,7 @@
       "source": "EUREF EPN (IZAN_31309M002.dat)",
       "lastDate": "2026-01-10",
       "lastUpMm": 3.2,
-      "dataAgeDays": 236,
+      "dataAgeDays": 237,
       "trend30dMmPerDay": 0.1186,
       "trend90dMmPerDay": -0.0049,
       "direction": "stable",
